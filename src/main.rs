@@ -746,7 +746,17 @@ async fn isgd(
     };
     let reply: serde_json::Value = match serde_json::from_slice(&out.stdout) {
         Ok(v) => v,
-        Err(_) => return json_error(StatusCode::BAD_GATEWAY, "is.gd is unreachable from the server"),
+        Err(_) => {
+            // Log what curl actually said (journalctl -u hashbox); visitors get a generic message.
+            let clip = |b: &[u8]| String::from_utf8_lossy(b).chars().take(300).collect::<String>();
+            eprintln!(
+                "is.gd relay failed: curl {} | stderr: {} | stdout: {}",
+                out.status,
+                clip(&out.stderr).trim(),
+                clip(&out.stdout).trim()
+            );
+            return json_error(StatusCode::BAD_GATEWAY, "is.gd is unreachable from the server");
+        }
     };
     match reply.get("shorturl").and_then(|s| s.as_str()) {
         Some(short) if short.starts_with("https://") && short.len() < 200 => {
