@@ -1,0 +1,6 @@
+# Cross-compile for the Raspberry Pi (Arch Linux ARM aarch64) from an x86 machine:
+#   rustup target add aarch64-unknown-linux-musl
+#   cargo build --release --target aarch64-unknown-linux-musl
+# Produces a fully static binary, no ARM C toolchain needed.
+[target.aarch64-unknown-linux-musl]
+linker = "rust-lld"

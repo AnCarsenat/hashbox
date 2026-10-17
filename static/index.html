@@ -1,0 +1,399 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<title>hashbox</title>
+<style>
+  :root {
+    --bg: #f6f5f1; --panel: #ffffff; --ink: #1b1b19; --muted: #6b6a64;
+    --line: #e2e0d8; --accent: #2f6f4f; --accent-ink: #ffffff;
+    --warn: #a3471c; --code: #f1efe8;
+    --mono: ui-monospace, "JetBrains Mono", "Fira Code", Menlo, Consolas, monospace;
+    --sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #141513; --panel: #1c1d1a; --ink: #ecebe5; --muted: #9a9890;
+      --line: #2e2f2a; --accent: #6fbf91; --accent-ink: #0f1a13;
+      --warn: #e3895c; --code: #232420;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.5 var(--sans); }
+  main { max-width: 880px; margin: 0 auto; padding: 28px 16px 60px; }
+  header { display: flex; align-items: baseline; gap: 12px; margin-bottom: 20px; }
+  header a { color: inherit; text-decoration: none; }
+  h1 { font: 700 20px/1 var(--mono); margin: 0; letter-spacing: -0.5px; }
+  h1 span { color: var(--accent); }
+  .tag { color: var(--muted); font-size: 13px; }
+  .tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--line); margin-bottom: 18px; }
+  .tabs button { background: none; border: 0; border-bottom: 2px solid transparent; color: var(--muted);
+    padding: 8px 14px; font: 600 14px var(--sans); cursor: pointer; margin-bottom: -1px; }
+  .tabs button[aria-selected="true"] { color: var(--ink); border-color: var(--accent); }
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 18px; }
+  textarea, input[type=text], input[type=url] {
+    width: 100%; background: var(--code); color: var(--ink); border: 1px solid var(--line);
+    border-radius: 8px; padding: 10px 12px; font: 14px/1.5 var(--mono); }
+  textarea { min-height: 280px; resize: vertical; }
+  textarea:focus, input:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+  .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 12px; }
+  .grow { flex: 1; min-width: 200px; }
+  button.btn { background: var(--accent); color: var(--accent-ink); border: 0; border-radius: 8px;
+    padding: 9px 16px; font: 600 14px var(--sans); cursor: pointer; }
+  button.ghost { background: transparent; color: var(--ink); border: 1px solid var(--line); }
+  button.btn:disabled { opacity: .5; cursor: default; }
+  .out { margin-top: 14px; display: none; }
+  .out.show { display: block; }
+  .linkbox { word-break: break-all; font: 13px/1.5 var(--mono); background: var(--code);
+    border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; }
+  .meta { color: var(--muted); font-size: 13px; margin-top: 6px; }
+  .meta.warn { color: var(--warn); }
+  label { font-size: 13px; color: var(--muted); display: block; margin-bottom: 6px; }
+  pre.view { margin: 0; padding: 14px; background: var(--code); border: 1px solid var(--line);
+    border-radius: 8px; overflow: auto; font: 13.5px/1.55 var(--mono); max-height: 75vh; }
+  pre.view.wrap { white-space: pre-wrap; word-break: break-word; }
+  .hidden { display: none !important; }
+  code { font: 13px var(--mono); background: var(--code); padding: 1px 5px; border-radius: 4px; }
+  .dest { font: 16px/1.4 var(--mono); word-break: break-all; margin: 8px 0 4px; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); display: inline-block; }
+  .dot.on { background: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 25%, transparent); }
+  .dot.off { background: var(--warn); }
+  .events { display: flex; flex-direction: column; gap: 10px; margin-top: 16px; }
+  .ev { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; }
+  .ev-head { display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; }
+  .method { font: 700 12px var(--mono); padding: 2px 7px; border-radius: 5px;
+    background: var(--accent); color: var(--accent-ink); }
+  .ev-path { font: 13px var(--mono); word-break: break-all; }
+  .ev-time { margin-left: auto; color: var(--muted); font-size: 12px; }
+  .ev pre { margin: 10px 0 0; max-height: 360px; }
+  details { margin-top: 8px; }
+  summary { cursor: pointer; color: var(--muted); font-size: 13px; }
+  table.h { border-collapse: collapse; margin-top: 6px; font: 12.5px var(--mono); width: 100%; }
+  table.h td { border-top: 1px solid var(--line); padding: 3px 8px 3px 0; vertical-align: top; word-break: break-all; }
+  table.h td:first-child { color: var(--muted); white-space: nowrap; width: 1%; }
+  .empty { color: var(--muted); text-align: center; padding: 30px 0; }
+  .help p { margin: 6px 0; }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <a href="/"><h1>hash<span>box</span></h1></a>
+    <span class="tag" id="tagline">data lives in the link, not on the server</span>
+  </header>
+
+  <!-- ===== Compose ===== -->
+  <section id="compose">
+    <div class="tabs" role="tablist">
+      <button role="tab" data-tab="text" aria-selected="true">Text</button>
+      <button role="tab" data-tab="url" aria-selected="false">URL</button>
+      <button role="tab" data-tab="hook" aria-selected="false">Webhook</button>
+    </div>
+
+    <div class="panel" data-pane="text">
+      <textarea id="text-in" placeholder="Paste text or code…" spellcheck="false"></textarea>
+      <div class="row">
+        <button class="btn" id="text-make">Create link</button>
+        <span class="meta" id="text-count"></span>
+      </div>
+      <div class="out" id="text-out">
+        <div class="linkbox" id="text-link"></div>
+        <div class="row"><button class="btn ghost" data-copy="text-link">Copy</button>
+          <button class="btn ghost" data-open="text-link">Open</button></div>
+        <div class="meta" id="text-meta"></div>
+      </div>
+    </div>
+
+    <div class="panel hidden" data-pane="url">
+      <label for="url-in">Destination URL</label>
+      <input type="url" id="url-in" placeholder="https://example.com/some/long/path" spellcheck="false">
+      <div class="row">
+        <button class="btn" id="url-make">Create link</button>
+      </div>
+      <div class="out" id="url-out">
+        <div class="linkbox" id="url-link"></div>
+        <div class="row"><button class="btn ghost" data-copy="url-link">Copy</button>
+          <button class="btn ghost" data-open="url-link">Open</button></div>
+        <div class="meta" id="url-meta"></div>
+      </div>
+    </div>
+
+    <div class="panel hidden help" data-pane="hook">
+      <label for="ch-in">Channel name (letters, digits, - and _; unguessable names act as a secret)</label>
+      <div class="row" style="margin-top:0">
+        <input type="text" id="ch-in" class="grow" spellcheck="false" maxlength="64">
+        <button class="btn ghost" id="ch-rand">Random</button>
+        <button class="btn" id="ch-open">Open monitor</button>
+      </div>
+      <p class="meta">Anything sent to <code>/hook/&lt;channel&gt;</code> is pushed live to every device
+        listening on <code>/listen/&lt;channel&gt;</code>: browsers, <code>curl -N</code>, scripts. Nothing is written to disk.</p>
+    </div>
+  </section>
+
+  <!-- ===== View text ===== -->
+  <section id="view-text" class="hidden">
+    <div class="row" style="margin:0 0 10px">
+      <button class="btn ghost" id="vt-copy">Copy text</button>
+      <button class="btn ghost" id="vt-wrap">Wrap lines</button>
+      <button class="btn ghost" id="vt-raw">Download</button>
+      <button class="btn ghost" id="vt-edit">Edit copy</button>
+      <span class="meta" id="vt-meta" style="margin:0"></span>
+    </div>
+    <pre class="view" id="vt-body"></pre>
+  </section>
+
+  <!-- ===== View URL ===== -->
+  <section id="view-url" class="hidden">
+    <div class="panel">
+      <div class="meta" style="margin:0">This link points to</div>
+      <div class="dest" id="vu-dest"></div>
+      <div class="meta" id="vu-note"></div>
+      <div class="row">
+        <button class="btn" id="vu-go">Go now</button>
+        <button class="btn ghost" id="vu-stop">Stay here</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===== Webhook monitor ===== -->
+  <section id="monitor" class="hidden help">
+    <div class="panel">
+      <div class="row" style="margin-top:0">
+        <span class="dot" id="m-dot"></span>
+        <strong id="m-title"></strong>
+        <span class="meta" id="m-state" style="margin:0">connecting…</span>
+      </div>
+      <p><label>Send webhooks to</label><span class="linkbox" style="display:block" id="m-hook"></span></p>
+      <p><label>Listen from a terminal or script</label><span class="linkbox" style="display:block" id="m-listen"></span></p>
+      <div class="row">
+        <button class="btn ghost" data-copy="m-hook">Copy hook URL</button>
+        <button class="btn ghost" id="m-test">Send test event</button>
+        <button class="btn ghost" id="m-clear">Clear view</button>
+        <span class="meta" id="m-count" style="margin:0"></span>
+      </div>
+    </div>
+    <div class="events" id="m-events"><div class="empty" id="m-empty">Waiting for webhooks…</div></div>
+  </section>
+</main>
+
+<script>
+"use strict";
+const $ = (id) => document.getElementById(id);
+const ORIGIN = location.origin;
+
+/* ---------- encoding: deflate-raw + base64url, with a raw fallback when shorter ---------- */
+function b64url(bytes) {
+  let s = "";
+  for (let i = 0; i < bytes.length; i += 0x8000) s += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  return btoa(s).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+function unb64url(str) {
+  const s = atob(str.replace(/-/g, "+").replace(/_/g, "/"));
+  const out = new Uint8Array(s.length);
+  for (let i = 0; i < s.length; i++) out[i] = s.charCodeAt(i);
+  return out;
+}
+async function pipe(bytes, transform) {
+  const stream = new Blob([bytes]).stream().pipeThrough(transform);
+  return new Uint8Array(await new Response(stream).arrayBuffer());
+}
+// Format: "z" + base64url(deflate-raw(utf8))  or  "r" + base64url(utf8)
+async function pack(text) {
+  const raw = new TextEncoder().encode(text);
+  const z = await pipe(raw, new CompressionStream("deflate-raw"));
+  return z.length < raw.length ? "z" + b64url(z) : "r" + b64url(raw);
+}
+async function unpack(data) {
+  const mode = data[0], bytes = unb64url(data.slice(1));
+  if (mode === "z") return new TextDecoder().decode(await pipe(bytes, new DecompressionStream("deflate-raw")));
+  if (mode === "r") return new TextDecoder().decode(bytes);
+  throw new Error("unknown encoding");
+}
+function sizeNote(link, el) {
+  const n = link.length;
+  el.className = "meta" + (n > 8000 ? " warn" : "");
+  el.textContent = n > 8000
+    ? `${n.toLocaleString()} characters. Very long: some chat apps and browsers may cut it.`
+    : `${n.toLocaleString()} characters. Works on any hashbox instance; just change the host.`;
+}
+
+/* ---------- helpers ---------- */
+async function copyFrom(el, btn) {
+  try { await navigator.clipboard.writeText(el.textContent); }
+  catch { const r = document.createRange(); r.selectNodeContents(el); getSelection().removeAllRanges(); getSelection().addRange(r); document.execCommand("copy"); }
+  if (btn) { const t = btn.textContent; btn.textContent = "Copied"; setTimeout(() => btn.textContent = t, 1200); }
+}
+document.addEventListener("click", (e) => {
+  const c = e.target.closest("[data-copy]"); if (c) copyFrom($(c.dataset.copy), c);
+  const o = e.target.closest("[data-open]"); if (o) window.open($(o.dataset.open).textContent, "_blank", "noopener");
+});
+function show(id) {
+  for (const s of ["compose", "view-text", "view-url", "monitor"]) $(s).classList.toggle("hidden", s !== id);
+}
+function randomChannel() {
+  const a = "abcdefghijkmnpqrstuvwxyz23456789", b = crypto.getRandomValues(new Uint8Array(16));
+  return Array.from(b, (x) => a[x % a.length]).join("");
+}
+
+/* ---------- compose ---------- */
+function initCompose(prefill) {
+  show("compose");
+  document.title = "hashbox";
+  const tabs = document.querySelectorAll(".tabs button");
+  const select = (name) => {
+    tabs.forEach((t) => t.setAttribute("aria-selected", String(t.dataset.tab === name)));
+    document.querySelectorAll("[data-pane]").forEach((p) => p.classList.toggle("hidden", p.dataset.pane !== name));
+  };
+  tabs.forEach((t) => t.addEventListener("click", () => select(t.dataset.tab)));
+
+  const ti = $("text-in");
+  const count = () => $("text-count").textContent = ti.value ? `${ti.value.length.toLocaleString()} chars` : "";
+  ti.addEventListener("input", count);
+  if (prefill != null) { ti.value = prefill; count(); }
+
+  $("text-make").addEventListener("click", async () => {
+    if (!ti.value) return ti.focus();
+    const link = `${ORIGIN}/#t:${await pack(ti.value)}`;
+    $("text-link").textContent = link; $("text-out").classList.add("show"); sizeNote(link, $("text-meta"));
+  });
+  ti.addEventListener("keydown", (e) => { if ((e.ctrlKey || e.metaKey) && e.key === "Enter") $("text-make").click(); });
+
+  $("url-make").addEventListener("click", async () => {
+    let u = $("url-in").value.trim();
+    if (!u) return $("url-in").focus();
+    if (!/^[a-z][a-z0-9+.-]*:/i.test(u)) u = "https://" + u;
+    let parsed; try { parsed = new URL(u); } catch { parsed = null; }
+    if (!parsed || !/^https?:$/.test(parsed.protocol)) {
+      $("url-meta").className = "meta warn"; $("url-meta").textContent = "Only http:// and https:// links are allowed.";
+      $("url-out").classList.add("show"); $("url-link").textContent = ""; return;
+    }
+    const link = `${ORIGIN}/#u:${await pack(parsed.href)}`;
+    $("url-link").textContent = link; $("url-out").classList.add("show"); sizeNote(link, $("url-meta"));
+  });
+  $("url-in").addEventListener("keydown", (e) => { if (e.key === "Enter") $("url-make").click(); });
+
+  $("ch-in").value = randomChannel();
+  $("ch-rand").addEventListener("click", () => $("ch-in").value = randomChannel());
+  $("ch-open").addEventListener("click", () => {
+    const c = $("ch-in").value.trim();
+    if (!/^[A-Za-z0-9_-]{1,64}$/.test(c)) { $("ch-in").focus(); return; }
+    location.href = `/w/${c}`;
+  });
+}
+
+/* ---------- view text ---------- */
+async function viewText(data) {
+  show("view-text");
+  let text;
+  try { text = await unpack(data); }
+  catch { $("vt-body").textContent = "This link is damaged or incomplete (it may have been cut when shared)."; return; }
+  document.title = "hashbox · paste";
+  $("vt-body").textContent = text;
+  const lines = text.split("\n").length;
+  $("vt-meta").textContent = `${lines.toLocaleString()} lines · ${text.length.toLocaleString()} chars`;
+  $("vt-copy").addEventListener("click", (e) => copyFrom($("vt-body"), e.target));
+  $("vt-wrap").addEventListener("click", () => $("vt-body").classList.toggle("wrap"));
+  $("vt-raw").addEventListener("click", () => {
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(new Blob([text], { type: "text/plain" })); a.download = "paste.txt"; a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  });
+  $("vt-edit").addEventListener("click", () => { history.pushState(null, "", "/"); initCompose(text); });
+}
+
+/* ---------- view URL ---------- */
+async function viewUrl(data) {
+  show("view-url");
+  let dest;
+  try { dest = new URL(await unpack(data)); } catch { dest = null; }
+  if (!dest || !/^https?:$/.test(dest.protocol)) {
+    $("vu-dest").textContent = "This link is damaged or not a valid web address.";
+    $("vu-go").classList.add("hidden"); $("vu-stop").classList.add("hidden"); return;
+  }
+  document.title = "hashbox · " + dest.hostname;
+  $("vu-dest").textContent = dest.href;
+  const go = () => location.replace(dest.href);
+  $("vu-go").addEventListener("click", go);
+  let left = 3;
+  const tick = () => { $("vu-note").textContent = `Redirecting to ${dest.hostname} in ${left}s…`; };
+  tick();
+  const timer = setInterval(() => { left--; if (left <= 0) { clearInterval(timer); go(); } else tick(); }, 1000);
+  $("vu-stop").addEventListener("click", () => { clearInterval(timer); $("vu-note").textContent = "Redirect cancelled."; });
+}
+
+/* ---------- webhook monitor ---------- */
+function monitor(channel) {
+  show("monitor");
+  document.title = "hashbox · " + channel;
+  $("tagline").textContent = "webhook monitor";
+  $("m-title").textContent = channel;
+  $("m-hook").textContent = `${ORIGIN}/hook/${channel}`;
+  $("m-listen").textContent = `curl -N ${ORIGIN}/listen/${channel}`;
+
+  const seen = new Set(); let n = 0;
+  const list = $("m-events");
+  const fmtTime = (ms) => new Date(ms).toLocaleTimeString();
+
+  function render(ev) {
+    if (seen.has(ev.id)) return; seen.add(ev.id); n++;
+    $("m-empty")?.remove();
+    $("m-count").textContent = `${n} event${n > 1 ? "s" : ""}`;
+    const card = document.createElement("div"); card.className = "ev";
+    const head = document.createElement("div"); head.className = "ev-head";
+    const m = document.createElement("span"); m.className = "method"; m.textContent = ev.method;
+    const p = document.createElement("span"); p.className = "ev-path"; p.textContent = "/" + channel + (ev.path || "");
+    const t = document.createElement("span"); t.className = "ev-time"; t.textContent = fmtTime(ev.time);
+    head.append(m, p, t); card.append(head);
+
+    let body = ev.body ?? null;
+    if (body != null) {
+      try { body = JSON.stringify(JSON.parse(body), null, 2); } catch {}
+      const pre = document.createElement("pre"); pre.className = "view wrap"; pre.textContent = body; card.append(pre);
+    } else if (ev.body_base64) {
+      const pre = document.createElement("pre"); pre.className = "view wrap";
+      pre.textContent = `[binary body, ${Math.floor(ev.body_base64.length * 3 / 4)} bytes, base64]\n` + ev.body_base64;
+      card.append(pre);
+    }
+    const d = document.createElement("details"); const s = document.createElement("summary");
+    s.textContent = `Headers (${ev.headers.length})`; d.append(s);
+    const tbl = document.createElement("table"); tbl.className = "h";
+    for (const [k, v] of ev.headers) {
+      const tr = tbl.insertRow(); tr.insertCell().textContent = k; tr.insertCell().textContent = v;
+    }
+    d.append(tbl); card.append(d);
+    list.prepend(card);
+    while (list.children.length > 200) list.lastChild.remove();
+  }
+
+  const setState = (cls, txt) => { $("m-dot").className = "dot " + cls; $("m-state").textContent = txt; };
+  const es = new EventSource(`/listen/${encodeURIComponent(channel)}?replay=20`);
+  es.addEventListener("ready", () => setState("on", "live"));
+  es.addEventListener("hook", (e) => render(JSON.parse(e.data)));
+  es.addEventListener("lagged", (e) => setState("on", `live (skipped ${e.data} events, too slow)`));
+  es.onerror = () => setState("off", "disconnected, retrying…");
+
+  $("m-test").addEventListener("click", () => fetch(`/hook/${channel}`, {
+    method: "POST", headers: { "content-type": "application/json" },
+    body: JSON.stringify({ test: true, from: "hashbox monitor", at: new Date().toISOString() }),
+  }));
+  $("m-clear").addEventListener("click", () => {
+    list.querySelectorAll(".ev").forEach((x) => x.remove()); n = 0; $("m-count").textContent = "";
+  });
+}
+
+/* ---------- router ---------- */
+function route() {
+  const h = location.hash.slice(1);
+  const w = location.pathname.match(/^\/w\/([A-Za-z0-9_-]{1,64})$/);
+  if (w) return monitor(w[1]);
+  if (h.startsWith("t:")) return viewText(h.slice(2));
+  if (h.startsWith("u:")) return viewUrl(h.slice(2));
+  initCompose();
+}
+window.addEventListener("hashchange", () => location.reload());
+route();
+</script>
+</body>
+</html>
