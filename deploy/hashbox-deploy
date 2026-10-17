@@ -154,6 +154,12 @@ cmd_install() {
 # hashbox settings (read at start; run 'systemctl restart hashbox' after editing).
 # Updates never change this file.
 HASHBOX_BIND=$bind
+# Shown on the Guidelines page as the address for abuse reports:
+#HASHBOX_CONTACT=you@example.com
+# Switch features off instantly if they get abused (comma list): chat,clipboard,isgd,hooks
+#HASHBOX_DISABLE=
+# Behind a reverse proxy, take visitor IPs from X-Forwarded-For for per-visitor limits:
+#HASHBOX_TRUST_PROXY=1
 # Limits (defaults shown):
 #HASHBOX_MAX_BODY_KB=256
 #HASHBOX_MAX_LISTENERS=200

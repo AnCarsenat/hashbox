@@ -87,13 +87,37 @@
     border-radius: 4px; padding: 1px 6px; }
   .settings { margin-top: 18px; border-top: 1px solid var(--line); padding-top: 12px; }
   .help p { margin: 6px 0; }
+  .sub { font: 600 14px var(--sans); margin: 0 0 8px; }
+  .split { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  @media (max-width: 680px) { .split { grid-template-columns: 1fr; } }
+  textarea.short { min-height: 120px; }
+  .bigcode { font: 700 32px/1.2 var(--mono); letter-spacing: 4px; margin: 4px 0; }
+  .host { font: 700 22px/1.3 var(--mono); word-break: break-all; margin: 6px 0 2px; }
+  .notice { border-left: 3px solid var(--warn); padding: 8px 12px; background: var(--code);
+    border-radius: 0 8px 8px 0; font-size: 13.5px; margin: 12px 0; }
+  .chat-log { height: 55vh; min-height: 260px; overflow-y: auto; display: flex; flex-direction: column; gap: 6px;
+    background: var(--code); border: 1px solid var(--line); border-radius: 10px; padding: 12px; margin-top: 12px; }
+  .msg { max-width: 85%; align-self: flex-start; background: var(--panel); border: 1px solid var(--line);
+    border-radius: 10px; padding: 6px 10px; }
+  .msg.mine { align-self: flex-end; border-color: var(--accent); }
+  .msg .who { font-size: 12px; color: var(--muted); }
+  .msg .who b { color: var(--ink); }
+  .msg .txt { white-space: pre-wrap; word-break: break-word; }
+  .sysmsg { align-self: center; color: var(--muted); font-size: 12.5px; }
+  .chat-in { display: flex; gap: 8px; margin-top: 10px; }
+  .chat-in textarea { min-height: 44px; height: 44px; resize: none; font-family: var(--sans); }
+  footer { margin-top: 36px; color: var(--muted); font-size: 13px; display: flex; gap: 14px; flex-wrap: wrap; }
+  footer a, .rules a { color: var(--accent); }
+  .rules h2 { font-size: 17px; margin: 22px 0 6px; }
+  .rules ul { padding-left: 20px; margin: 6px 0; }
+  .rules li { margin: 3px 0; }
 </style>
 </head>
 <body>
 <main>
   <header>
     <a href="/"><h1>hash<span>box</span></h1></a>
-    <span class="tag" id="tagline">data lives in the link, not on the server</span>
+    <span class="tag" id="tagline">share text, links, clipboards and chats · nothing saved</span>
   </header>
 
   <!-- ===== Compose ===== -->
@@ -101,7 +125,9 @@
     <div class="tabs" role="tablist">
       <button role="tab" data-tab="text" aria-selected="true">Text</button>
       <button role="tab" data-tab="url" aria-selected="false">URL</button>
-      <button role="tab" data-tab="hook" aria-selected="false">Webhook</button>
+      <button role="tab" data-tab="clip" aria-selected="false" data-feature="clipboard">Clipboard</button>
+      <button role="tab" data-tab="chat" aria-selected="false" data-feature="chat">Chat</button>
+      <button role="tab" data-tab="hook" aria-selected="false" data-feature="hooks">Webhook</button>
     </div>
 
     <div class="panel" data-pane="text">
@@ -147,6 +173,64 @@
       </details>
     </div>
 
+    <div class="panel hidden" data-pane="clip">
+      <div class="split">
+        <div>
+          <p class="sub">Send once</p>
+          <textarea id="drop-in" class="short" placeholder="Paste what you want on your other device…" spellcheck="false"></textarea>
+          <div class="row">
+            <button class="btn" id="drop-make">Get a code</button>
+            <label class="check"><input type="checkbox" id="drop-burn" checked> Delete after first view</label>
+          </div>
+          <div class="out" id="drop-out">
+            <div class="meta" style="margin:0">On the other device, open this site and enter</div>
+            <div class="bigcode" id="drop-code"></div>
+            <div class="linkbox" id="drop-link"></div>
+            <div class="row"><button class="btn ghost" data-copy="drop-link">Copy link</button>
+              <button class="btn ghost" id="drop-del">Delete now</button></div>
+            <div class="meta" id="drop-meta"></div>
+          </div>
+          <div class="meta warn hidden" id="drop-err"></div>
+        </div>
+        <div>
+          <p class="sub">Receive</p>
+          <label for="get-code">Code from the other device</label>
+          <div class="row" style="margin-top:0">
+            <input type="text" id="get-code" class="grow" maxlength="6" placeholder="e.g. 7kq2mx" autocomplete="off" autocapitalize="off" spellcheck="false">
+            <button class="btn" id="get-open">Open</button>
+          </div>
+          <p class="sub" style="margin-top:22px">Live sync</p>
+          <p class="meta" style="margin-top:0">Devices that open the same code mirror each other's clipboard while the page is open.</p>
+          <div class="row" style="margin-top:0">
+            <input type="text" id="sync-code" class="grow" maxlength="32" autocomplete="off" autocapitalize="off" spellcheck="false">
+            <button class="btn ghost" id="sync-rand">Random</button>
+            <button class="btn" id="sync-open">Open</button>
+          </div>
+        </div>
+      </div>
+      <p class="meta" id="clip-note"></p>
+    </div>
+
+    <div class="panel hidden" data-pane="chat">
+      <div class="split">
+        <div>
+          <label for="nick-in">Your nickname</label>
+          <input type="text" id="nick-in" maxlength="24" placeholder="e.g. elian" autocomplete="nickname">
+        </div>
+        <div>
+          <label for="room-in">Room code (share it with the people you want to talk to)</label>
+          <div class="row" style="margin-top:0">
+            <input type="text" id="room-in" class="grow" maxlength="32" autocomplete="off" autocapitalize="off" spellcheck="false">
+            <button class="btn ghost" id="room-rand">Random</button>
+          </div>
+        </div>
+      </div>
+      <div class="row"><button class="btn" id="room-join">Join room</button></div>
+      <p class="meta">Anyone with the code can read and write in the room, so prefer the random codes.
+        Messages pass through this server's memory and disappear about 2 minutes after everyone leaves.
+        Nothing is saved to disk, and there are no accounts or moderators: don't share anything sensitive.</p>
+    </div>
+
     <div class="panel hidden help" data-pane="hook">
       <label for="ch-in">Channel name (letters, digits, - and _; unguessable names act as a secret)</label>
       <div class="row" style="margin-top:0">
@@ -171,16 +255,135 @@
     <pre class="view" id="vt-body"></pre>
   </section>
 
-  <!-- ===== View URL ===== -->
+  <!-- ===== View URL: always a click-through, never an automatic redirect ===== -->
   <section id="view-url" class="hidden">
     <div class="panel">
-      <div class="meta" style="margin:0">This link points to</div>
-      <div class="dest" id="vu-dest"></div>
-      <div class="meta" id="vu-note"></div>
+      <div class="meta" style="margin:0" id="vu-lead">This link leads to</div>
+      <div class="host" id="vu-host"></div>
+      <div class="dest" id="vu-dest" style="font-size:13.5px;color:var(--muted)"></div>
+      <div class="notice" id="vu-warn">Someone made this link with hashbox; nobody here has checked where it goes.
+        Only continue if you trust <b id="vu-host2"></b> and expected this link.
+        Never enter passwords or payment details on a page you reached from a link you weren't expecting.</div>
       <div class="row">
-        <button class="btn" id="vu-go">Go now</button>
-        <button class="btn ghost" id="vu-stop">Stay here</button>
+        <button class="btn" id="vu-go"></button>
+        <a class="meta" href="/rules#report" style="margin:0 0 0 auto">Report this link</a>
       </div>
+    </div>
+  </section>
+
+  <!-- ===== Clipboard drop ===== -->
+  <section id="view-drop" class="hidden">
+    <div class="panel">
+      <p class="sub">Clipboard <span id="vd-code" style="font-family:var(--mono)"></span></p>
+      <div id="vd-reveal">
+        <p class="meta" style="margin-top:0" id="vd-hint">Someone sent you some text. It may be deleted from the server as soon as you open it.</p>
+        <button class="btn" id="vd-show">Show it</button>
+      </div>
+      <div class="hidden" id="vd-body">
+        <pre class="view wrap" id="vd-text"></pre>
+        <div class="row"><button class="btn" id="vd-copy">Copy</button>
+          <span class="meta" id="vd-meta" style="margin:0"></span></div>
+      </div>
+      <div class="meta warn hidden" id="vd-err"></div>
+    </div>
+  </section>
+
+  <!-- ===== Live clipboard sync ===== -->
+  <section id="sync" class="hidden">
+    <div class="panel">
+      <div class="row" style="margin-top:0">
+        <span class="dot" id="sy-dot"></span><strong>Live clipboard</strong>
+        <code id="sy-code"></code>
+        <span class="meta" id="sy-state" style="margin:0">connecting…</span>
+        <button class="btn ghost" data-copy="sy-link" style="margin-left:auto">Copy link</button>
+        <span class="hidden" id="sy-link"></span>
+      </div>
+      <div class="split" style="margin-top:14px">
+        <div>
+          <label for="sy-in">Paste here to send to the other devices</label>
+          <textarea id="sy-in" class="short" spellcheck="false"></textarea>
+          <div class="row"><button class="btn" id="sy-send">Send</button>
+            <label class="check"><input type="checkbox" id="sy-auto" checked> Send on paste</label>
+            <span class="meta" id="sy-sent" style="margin:0"></span></div>
+        </div>
+        <div>
+          <label>Latest clipboard <span id="sy-when"></span></label>
+          <pre class="view wrap" id="sy-latest" style="min-height:120px"></pre>
+          <div class="row"><button class="btn ghost" id="sy-copy">Copy</button></div>
+        </div>
+      </div>
+      <p class="meta">Anyone who knows this code sees what you send. Only the latest text is kept, in memory,
+        and it disappears about 2 minutes after every device has left.</p>
+    </div>
+  </section>
+
+  <!-- ===== Chat room ===== -->
+  <section id="chat" class="hidden">
+    <div class="panel">
+      <div class="row" style="margin-top:0">
+        <span class="dot" id="ch-dot"></span><strong>Room</strong> <code id="ch-code"></code>
+        <span class="meta" id="ch-state" style="margin:0">connecting…</span>
+        <button class="btn ghost" data-copy="ch-link" style="margin-left:auto">Copy invite link</button>
+        <span class="hidden" id="ch-link"></span>
+      </div>
+      <div class="hidden" id="ch-nickbox">
+        <label for="ch-nick" style="margin-top:12px">Choose a nickname to join</label>
+        <div class="row" style="margin-top:0">
+          <input type="text" id="ch-nick" class="grow" maxlength="24" autocomplete="nickname">
+          <button class="btn" id="ch-nickgo">Join</button>
+        </div>
+      </div>
+      <div class="chat-log" id="ch-log"></div>
+      <div class="chat-in">
+        <textarea id="cr-msg" maxlength="1000" placeholder="Message (Enter to send, Shift+Enter for a new line)"></textarea>
+        <button class="btn" id="ch-send">Send</button>
+      </div>
+      <p class="meta">Links in messages are not clickable on purpose: copy them only if you trust the sender.
+        Messages disappear about 2 minutes after everyone leaves.</p>
+    </div>
+  </section>
+
+  <!-- ===== Rules ===== -->
+  <section id="rules" class="hidden rules">
+    <div class="panel">
+      <h2 style="margin-top:0">Guidelines</h2>
+      <p>hashbox is a small, free tool run by one person. There are no accounts and no moderators,
+        so it is built to keep as little as possible, for as short a time as possible.</p>
+
+      <h2>What happens to what you share</h2>
+      <ul>
+        <li><b>Text and URL links</b> are stored inside the link itself. This server never receives their content.</li>
+        <li><b>Chat messages and live clipboard</b> pass through this server's memory only, and disappear about
+          2 minutes after everyone has left. Nothing is written to disk.</li>
+        <li><b>Clipboard drops</b> stay in memory until they are opened (if set to delete after viewing)
+          or for <span id="r-ttl">10</span> minutes at most.</li>
+        <li><b>is.gd links</b> are created by is.gd, a separate service, and kept by them permanently.</li>
+        <li>No logs of content are kept. Like any web server, this one sees your IP address while you
+          use it, to apply rate limits; it isn't stored.</li>
+      </ul>
+
+      <h2>Don't use hashbox to</h2>
+      <ul>
+        <li>share malware, phishing pages, scams or links to them;</li>
+        <li>share anything illegal, above all sexual content involving minors;</li>
+        <li>harass, threaten or dox anyone, or share someone's private information without consent;</li>
+        <li>send spam, or automate the site to flood it;</li>
+        <li>share passwords, bank details or other secrets: anyone with a link or code can see them.</li>
+      </ul>
+
+      <h2>How safety works without moderators</h2>
+      <ul>
+        <li>Links never redirect automatically: you always see the real destination and decide.</li>
+        <li>Links in chat are not clickable.</li>
+        <li>Everything expires by itself, and every feature has size and rate limits.</li>
+        <li>The operator can switch off any feature immediately if it is being abused.</li>
+      </ul>
+
+      <h2 id="report">Report abuse</h2>
+      <p id="r-contact"></p>
+      <p class="meta">Because content isn't stored, there is usually nothing to delete afterwards: a chat or clipboard
+        is gone minutes after it's closed. For a link, the content is in the link itself, so please also report it
+        to the site it points to, or to <a href="https://safebrowsing.google.com/safebrowsing/report_phish/" rel="noopener noreferrer" target="_blank">Google Safe Browsing</a>.</p>
     </div>
   </section>
 
@@ -203,6 +406,8 @@
     </div>
     <div class="events" id="m-events"><div class="empty" id="m-empty">Waiting for webhooks…</div></div>
   </section>
+
+  <footer><a href="/">hashbox</a><a href="/rules">Guidelines</a><a href="/rules#report">Report abuse</a></footer>
 </main>
 
 <script>
@@ -376,21 +581,47 @@ async function gistRead(s) {
 }
 
 /* ---------- helpers ---------- */
+// navigator.clipboard only exists on HTTPS; on plain HTTP fall back to a hidden textarea.
+async function copyText(text) {
+  try { await navigator.clipboard.writeText(text); return true; } catch {}
+  const ta = document.createElement("textarea");
+  ta.value = text; ta.setAttribute("readonly", ""); ta.style.position = "fixed"; ta.style.opacity = "0";
+  document.body.append(ta); ta.select(); ta.setSelectionRange(0, text.length);
+  let ok = false; try { ok = document.execCommand("copy"); } catch {}
+  ta.remove(); return ok;
+}
 async function copyFrom(el, btn) {
-  try { await navigator.clipboard.writeText(el.textContent); }
-  catch { const r = document.createRange(); r.selectNodeContents(el); getSelection().removeAllRanges(); getSelection().addRange(r); document.execCommand("copy"); }
-  if (btn) { const t = btn.textContent; btn.textContent = "Copied"; setTimeout(() => btn.textContent = t, 1200); }
+  const ok = await copyText(el.value ?? el.textContent);
+  if (btn) { const t = btn.textContent; btn.textContent = ok ? "Copied" : "Select and copy manually"; setTimeout(() => btn.textContent = t, 1400); }
 }
 document.addEventListener("click", (e) => {
   const c = e.target.closest("[data-copy]"); if (c) copyFrom($(c.dataset.copy), c);
   const o = e.target.closest("[data-open]"); if (o) window.open($(o.dataset.open).textContent, "_blank", "noopener");
 });
-function show(id) {
-  for (const s of ["compose", "view-text", "view-url", "monitor"]) $(s).classList.toggle("hidden", s !== id);
-}
-function randomChannel() {
-  const a = "abcdefghijkmnpqrstuvwxyz23456789", b = crypto.getRandomValues(new Uint8Array(16));
+const SECTIONS = ["compose", "view-text", "view-url", "view-drop", "sync", "chat", "rules", "monitor"];
+function show(id) { for (const s of SECTIONS) $(s).classList.toggle("hidden", s !== id); }
+function randomCode(n = 16) {
+  const a = "abcdefghijkmnpqrstuvwxyz23456789", b = crypto.getRandomValues(new Uint8Array(n));
   return Array.from(b, (x) => a[x % a.length]).join("");
+}
+const randomChannel = () => randomCode(16);
+const roomCode = () => `${randomCode(4)}-${randomCode(4)}`;
+const ROOM_RE = /^[a-z0-9-]{4,32}$/;
+function store(key, val) { try { if (val === undefined) return localStorage.getItem(key); localStorage.setItem(key, val); } catch {} return null; }
+async function api(path, body, method) {
+  const r = await fetch(path, body === undefined ? { method: method || "GET" }
+    : { method: method || "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(j.error || `server error ${r.status}`);
+  return j;
+}
+const fmtTime = (ms) => new Date(ms).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+
+/* ---------- server config: which features are on, who to contact ---------- */
+let CONFIG = { features: { chat: true, clipboard: true, isgd: true, hooks: true }, contact: null, drop_minutes: 10 };
+const configReady = fetch("/api/config").then((r) => r.json()).then((c) => { CONFIG = c; }).catch(() => {});
+function applyFeatures() {
+  document.querySelectorAll("[data-feature]").forEach((el) => el.classList.toggle("hidden", !CONFIG.features[el.dataset.feature]));
 }
 
 /* ---------- compose ---------- */
@@ -417,6 +648,9 @@ function initCompose(prefill) {
   ti.addEventListener("keydown", (e) => { if ((e.ctrlKey || e.metaKey) && e.key === "Enter") $("text-make").click(); });
 
   initUrlPicker();
+  initClipboardTab();
+  initChatTab();
+  applyFeatures();
 
   $("ch-in").value = randomChannel();
   $("ch-rand").addEventListener("click", () => $("ch-in").value = randomChannel());
@@ -425,6 +659,62 @@ function initCompose(prefill) {
     if (!/^[A-Za-z0-9_-]{1,64}$/.test(c)) { $("ch-in").focus(); return; }
     location.href = `/w/${c}`;
   });
+}
+
+/* ---------- Clipboard tab: one-shot drop, receive by code, live sync ---------- */
+function initClipboardTab() {
+  $("clip-note").textContent = `Sent text is kept in this server's memory only, for ${CONFIG.drop_minutes} minutes at most. `
+    + "Anyone who has the code can read it, so don't use this for passwords.";
+  let lastCode = null;
+  $("drop-make").addEventListener("click", async () => {
+    const text = $("drop-in").value;
+    if (!text) return $("drop-in").focus();
+    $("drop-err").classList.add("hidden");
+    try {
+      const j = await api("/api/drop", { text, burn: $("drop-burn").checked });
+      lastCode = j.code;
+      $("drop-code").textContent = j.code;
+      $("drop-link").textContent = `${ORIGIN}/d/${j.code}`;
+      $("drop-meta").textContent = j.burn ? `Deleted when opened, or after ${j.minutes} minutes.` : `Deleted after ${j.minutes} minutes.`;
+      $("drop-out").classList.add("show");
+    } catch (e) { $("drop-err").textContent = e.message; $("drop-err").classList.remove("hidden"); }
+  });
+  $("drop-del").addEventListener("click", async () => {
+    if (!lastCode) return;
+    await api(`/api/drop/${lastCode}`, undefined, "DELETE").catch(() => {});
+    $("drop-meta").textContent = "Deleted from the server."; lastCode = null;
+  });
+  const openDrop = () => {
+    const c = $("get-code").value.trim().toLowerCase();
+    if (!/^[a-z0-9]{6}$/.test(c)) return $("get-code").focus();
+    location.href = `/d/${c}`;
+  };
+  $("get-open").addEventListener("click", openDrop);
+  $("get-code").addEventListener("keydown", (e) => { if (e.key === "Enter") openDrop(); });
+
+  $("sync-code").value = roomCode();
+  $("sync-rand").addEventListener("click", () => $("sync-code").value = roomCode());
+  $("sync-open").addEventListener("click", () => {
+    const c = $("sync-code").value.trim().toLowerCase();
+    if (!ROOM_RE.test(c)) return $("sync-code").focus();
+    location.href = `/s/${c}`;
+  });
+}
+
+/* ---------- Chat tab ---------- */
+function initChatTab() {
+  $("nick-in").value = store("hashbox.nick") || "";
+  $("room-in").value = roomCode();
+  $("room-rand").addEventListener("click", () => $("room-in").value = roomCode());
+  const join = () => {
+    const nick = $("nick-in").value.trim(), c = $("room-in").value.trim().toLowerCase();
+    if (!nick) return $("nick-in").focus();
+    if (!ROOM_RE.test(c)) return $("room-in").focus();
+    store("hashbox.nick", nick);
+    location.href = `/c/${c}`;
+  };
+  $("room-join").addEventListener("click", join);
+  $("room-in").addEventListener("keydown", (e) => { if (e.key === "Enter") join(); });
 }
 
 /* ---------- URL tab: three ways to shorten, best one proposed ---------- */
@@ -475,7 +765,7 @@ async function shorten() {
   }
   if ($("url-strip").checked) u = stripTracking(u);
   const inlink = `${ORIGIN}/#${await inlinkFor(u)}`;
-  const rec = inlink.length <= INLINK_GOOD ? "inlink" : "isgd";
+  const rec = inlink.length <= INLINK_GOOD || !CONFIG.features.isgd ? "inlink" : "isgd";
   cur = { url: u.href, links: { inlink }, errors: {}, rec, sel: rec };
   $("url-out").classList.add("show");
   select(rec);
@@ -489,6 +779,7 @@ function estLen(kind) {
 function renderOpts() {
   const box = $("url-opts"); box.textContent = "";
   for (const [kind, o] of Object.entries(OPTIONS)) {
+    if (kind === "isgd" && !CONFIG.features.isgd) continue;
     const b = document.createElement("button");
     b.className = "opt"; b.type = "button"; b.setAttribute("role", "radio");
     b.setAttribute("aria-checked", String(cur.sel === kind));
@@ -552,18 +843,137 @@ async function viewUrl(frag) {
   try { dest = new URL(await decodeUrlFragment(frag)); }
   catch (e) { dest = null; if (frag.startsWith("s:") && e.message) why = e.message + "."; }
   if (!dest || !/^https?:$/.test(dest.protocol)) {
-    $("vu-dest").textContent = why;
-    $("vu-go").classList.add("hidden"); $("vu-stop").classList.add("hidden"); return;
+    $("vu-lead").textContent = ""; $("vu-host").textContent = "";
+    $("vu-dest").textContent = why; $("vu-dest").style.color = "var(--warn)";
+    $("vu-go").classList.add("hidden"); $("vu-warn").classList.add("hidden"); return;
   }
-  document.title = "hashbox · " + dest.hostname;
+  // The hostname is shown big and on its own (URL() already turns look-alike
+  // Unicode domains into their xn-- form), so the destination can't hide in a long URL.
+  document.title = "hashbox · link to " + dest.hostname;
+  $("vu-host").textContent = dest.hostname;
+  $("vu-host2").textContent = dest.hostname;
   $("vu-dest").textContent = dest.href;
-  const go = () => location.replace(dest.href);
-  $("vu-go").addEventListener("click", go);
-  let left = 3;
-  const tick = () => { $("vu-note").textContent = `Redirecting to ${dest.hostname} in ${left}s…`; };
-  tick();
-  const timer = setInterval(() => { left--; if (left <= 0) { clearInterval(timer); go(); } else tick(); }, 1000);
-  $("vu-stop").addEventListener("click", () => { clearInterval(timer); $("vu-note").textContent = "Redirect cancelled."; });
+  if (dest.protocol === "http:") $("vu-lead").textContent = "This link leads to an unencrypted (http) site:";
+  $("vu-go").textContent = `Continue to ${dest.hostname}`;
+  $("vu-go").addEventListener("click", () => {
+    // Open without telling the destination where the visitor came from.
+    const a = document.createElement("a");
+    a.href = dest.href; a.rel = "noopener noreferrer"; a.click();
+  });
+}
+
+/* ---------- clipboard drop ---------- */
+function viewDrop(code) {
+  show("view-drop");
+  document.title = "hashbox · clipboard";
+  $("vd-code").textContent = code;
+  // The text is only fetched on click, so link previews in chat apps can't "open" it first.
+  $("vd-show").addEventListener("click", async () => {
+    try {
+      const j = await api(`/api/drop/${code}`);
+      $("vd-reveal").classList.add("hidden"); $("vd-body").classList.remove("hidden");
+      $("vd-text").textContent = j.text;
+      $("vd-meta").textContent = j.burned ? "Deleted from the server. Copy it now if you need it."
+        : `Stays available for ${Math.max(1, Math.round(j.seconds_left / 60))} more minute(s).`;
+      $("vd-copy").addEventListener("click", (e) => copyFrom($("vd-text"), e.target));
+    } catch (e) { $("vd-reveal").classList.add("hidden"); $("vd-err").textContent = e.message; $("vd-err").classList.remove("hidden"); }
+  });
+}
+
+/* ---------- live clipboard sync ---------- */
+function viewSync(code) {
+  show("sync");
+  document.title = "hashbox · live clipboard";
+  $("sy-code").textContent = code;
+  $("sy-link").textContent = `${ORIGIN}/s/${code}`;
+  let myLast = null, latest = "";
+  const setState = (cls, txt) => { $("sy-dot").className = "dot " + cls; $("sy-state").textContent = txt; };
+  const send = async () => {
+    const text = $("sy-in").value;
+    if (!text) return;
+    try {
+      const j = await api(`/api/sync/${code}`, { text });
+      myLast = j.id; $("sy-sent").textContent = `Sent to ${j.delivered_to - 1 > 0 ? j.delivered_to - 1 + " other device(s)" : "no other device yet"}`;
+    } catch (e) { $("sy-sent").textContent = e.message; }
+  };
+  $("sy-send").addEventListener("click", send);
+  $("sy-in").addEventListener("paste", () => { if ($("sy-auto").checked) setTimeout(send, 0); });
+  $("sy-copy").addEventListener("click", (e) => copyFrom($("sy-latest"), e.target));
+  const es = new EventSource(`/api/sync/${code}/stream`);
+  es.addEventListener("ready", () => setState("on", "live"));
+  es.addEventListener("presence", (e) => setState("on", `live · ${JSON.parse(e.data).online} device(s)`));
+  es.addEventListener("clip", (e) => {
+    const m = JSON.parse(e.data);
+    latest = m.text; $("sy-latest").textContent = latest;
+    $("sy-when").textContent = `(${m.id === myLast ? "from this device" : "received"} at ${fmtTime(m.time)})`;
+  });
+  es.onerror = () => setState("off", "disconnected, retrying…");
+}
+
+/* ---------- chat room ---------- */
+function viewChat(code) {
+  show("chat");
+  document.title = "hashbox · chat " + code;
+  $("ch-code").textContent = code;
+  $("ch-link").textContent = `${ORIGIN}/c/${code}`;
+  const log = $("ch-log"), seen = new Set(), mine = new Set();
+  let nick = store("hashbox.nick") || "";
+  const setState = (cls, txt) => { $("ch-dot").className = "dot " + cls; $("ch-state").textContent = txt; };
+  const sys = (t) => { const d = document.createElement("div"); d.className = "sysmsg"; d.textContent = t; log.append(d); log.scrollTop = log.scrollHeight; };
+  const render = (m) => {
+    if (seen.has(m.id)) return; seen.add(m.id);
+    const stick = log.scrollHeight - log.scrollTop - log.clientHeight < 40;
+    const d = document.createElement("div"); d.className = "msg" + (mine.has(m.id) ? " mine" : ""); d.dataset.id = m.id;
+    const who = document.createElement("div"); who.className = "who";
+    const b = document.createElement("b"); b.textContent = m.nick; who.append(b, " · " + fmtTime(m.time));
+    const t = document.createElement("div"); t.className = "txt"; t.textContent = m.text;  // plain text: links stay unclickable
+    d.append(who, t); log.append(d);
+    while (log.children.length > 300) log.firstChild.remove();
+    if (stick || mine.has(m.id)) log.scrollTop = log.scrollHeight;
+  };
+  const needNick = () => { $("ch-nickbox").classList.toggle("hidden", !!nick); $("cr-msg").disabled = !nick; $("ch-send").disabled = !nick; };
+  needNick();
+  $("ch-nick").value = nick;
+  const setNick = () => { const n = $("ch-nick").value.trim(); if (!n) return $("ch-nick").focus(); nick = n; store("hashbox.nick", n); needNick(); $("cr-msg").focus(); };
+  $("ch-nickgo").addEventListener("click", setNick);
+  $("ch-nick").addEventListener("keydown", (e) => { if (e.key === "Enter") setNick(); });
+
+  const send = async () => {
+    const text = $("cr-msg").value.trim();
+    if (!text || !nick) return;
+    $("ch-send").disabled = true;
+    try {
+      const j = await api(`/api/chat/${code}`, { nick, text });
+      mine.add(j.id); $("cr-msg").value = "";
+      const el = [...log.children].find((x) => x.dataset?.id === String(j.id)); if (el) el.classList.add("mine");
+    } catch (e) { sys(e.message); }
+    $("ch-send").disabled = false; $("cr-msg").focus();
+  };
+  $("ch-send").addEventListener("click", send);
+  $("cr-msg").addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } });
+
+  sys("Messages here are visible to anyone with the room code and vanish about 2 minutes after everyone leaves.");
+  const es = new EventSource(`/api/chat/${code}/stream`);
+  es.addEventListener("ready", () => setState("on", "live"));
+  es.addEventListener("presence", (e) => { const n = JSON.parse(e.data).online; setState("on", `${n} online`); });
+  es.addEventListener("msg", (e) => render(JSON.parse(e.data)));
+  es.addEventListener("lagged", () => sys("Some messages were skipped (connection too slow)."));
+  es.onerror = () => setState("off", "disconnected, retrying…");
+}
+
+/* ---------- guidelines ---------- */
+function viewRules() {
+  show("rules");
+  document.title = "hashbox · guidelines";
+  $("r-ttl").textContent = CONFIG.drop_minutes;
+  const c = $("r-contact");
+  if (CONFIG.contact) {
+    c.append("To report abuse, contact the operator at ");
+    const b = document.createElement("b"); b.textContent = CONFIG.contact; c.append(b, ". Include the link or room code.");
+  } else {
+    c.textContent = "This server's operator hasn't published a contact address.";
+  }
+  if (location.hash === "#report") $("report").scrollIntoView();
 }
 
 /* ---------- webhook monitor ---------- */
@@ -627,16 +1037,21 @@ function monitor(channel) {
 }
 
 /* ---------- router ---------- */
-function route() {
-  const h = location.hash.slice(1);
-  const w = location.pathname.match(/^\/w\/([A-Za-z0-9_-]{1,64})$/);
-  if (w) return monitor(w[1]);
+async function route() {
+  await configReady;
+  const h = location.hash.slice(1), p = location.pathname;
+  let m;
+  if ((m = p.match(/^\/w\/([A-Za-z0-9_-]{1,64})$/))) return monitor(m[1]);
+  if ((m = p.match(/^\/c\/([A-Za-z0-9-]{4,32})$/))) return viewChat(m[1].toLowerCase());
+  if ((m = p.match(/^\/s\/([A-Za-z0-9-]{4,32})$/))) return viewSync(m[1].toLowerCase());
+  if ((m = p.match(/^\/d\/([A-Za-z0-9]{6})$/))) return viewDrop(m[1].toLowerCase());
+  if (p === "/rules") return viewRules();
   if (h.startsWith("t:")) return viewText(h.slice(2));
   const tag = h.slice(0, h.indexOf(":"));
   if (h.includes(":") && URL_TAGS.has(tag)) return viewUrl(h);
   initCompose();
 }
-window.addEventListener("hashchange", () => location.reload());
+window.addEventListener("hashchange", () => { if (location.pathname !== "/rules") location.reload(); });
 route();
 </script>
 </body>
