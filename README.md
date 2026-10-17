@@ -1,6 +1,6 @@
 # hashbox
 
-One small binary (~900 KB, ~5 MB RAM) for the Raspberry Pi:
+One small static binary (~900 KB, a few MB of RAM) for a VPS or a Raspberry Pi:
 
 - **Text & URL links with the data inside the link.** Content is compressed into
   the URL fragment (`#t:...` for text, `#u:...` for URLs). Browsers never send the
@@ -8,6 +8,75 @@ One small binary (~900 KB, ~5 MB RAM) for the Raspberry Pi:
   server A opens on server B (just change the host) with no communication between them.
 - **Webhook fan-out relay.** Anything sent to `/hook/<channel>` is pushed live to
   every device listening on `/listen/<channel>`: browsers, `curl -N`, scripts.
+
+## Install (VPS or Pi)
+
+```bash
+curl -fsSL https://github.com/AnCarsenat/hashbox/releases/download/latest/hashbox-deploy | sudo bash -s install
+```
+
+This creates a `hashbox` system user (no login, no home), installs the binary and a
+sandboxed systemd service listening on `127.0.0.1:8080`, and enables a timer that
+installs new builds automatically. Put Caddy in front for HTTPS:
+
+```
+hashbox.<server-ip>.sslip.io {
+    reverse_proxy 127.0.0.1:8080
+}
+```
+
+Use `--bind 0.0.0.0:8080` to listen on the network directly instead.
+
+### How updates work
+
+Every push to `main` runs `.github/workflows/release.yml`, which builds static x86_64
+and aarch64 binaries and publishes them, with a `SHA256SUMS` file, to the rolling
+[`latest` release](../../releases/tag/latest). Every 15 minutes `hashbox-update.timer`
+runs `hashbox-deploy update`, which:
+
+1. compares the published `VERSION` (the commit id) with the installed one, and stops if equal;
+2. downloads the build for its CPU over HTTPS and verifies every file against `SHA256SUMS`;
+3. swaps in the new binary and units, restarts, and checks `/healthz`;
+4. **rolls back** to the previous binary automatically if the health check fails.
+
+```bash
+sudo hashbox-deploy status            # version, service, timer, health
+sudo hashbox-deploy update            # check now (--force to reinstall)
+journalctl -u hashbox-update          # update history
+sudo hashbox-deploy uninstall         # remove (keeps /etc/hashbox)
+```
+
+Settings live in `/etc/hashbox/hashbox.env` and are never touched by updates.
+
+## Limits and hardening
+
+Everything is in RAM and bounded. Defaults, overridable in `/etc/hashbox/hashbox.env`:
+
+| Setting | Default | What happens past it |
+|---|---|---|
+| `HASHBOX_MAX_BODY_KB` | 256 | Webhook rejected with 413 |
+| `HASHBOX_HOOKS_PER_MINUTE` | 120 per channel | 429 with `Retry-After: 60` |
+| `HASHBOX_MAX_LISTENERS` | 200 total | New listeners get 429 |
+| `HASHBOX_MAX_LISTENERS_PER_CHANNEL` | 20 | New listeners get 429 |
+| `HASHBOX_HISTORY_MB` | 8 | Oldest stored events (all channels) are evicted |
+| `HASHBOX_MAX_CHANNELS` | 1000 | Idle channels are dropped, then 503 |
+
+Also: proxy and cookie headers are not rebroadcast, is.gd calls are capped at 20/min,
+listener streams end on shutdown so restarts take milliseconds, and the systemd unit
+runs with no capabilities, a read-only system, a syscall filter and `MemoryMax=64M`.
+
+There is no authentication inside hashbox. When it is public, protect `/listen/*`,
+`/w/*` and `/api/*` in the reverse proxy, for example with Caddy:
+
+```
+hashbox.<server-ip>.sslip.io {
+    @private path /api/* /listen/* /w/*
+    basic_auth @private {
+        you <hash from `caddy hash-password`>
+    }
+    reverse_proxy 127.0.0.1:8080
+}
+```
 
 ## URL shortening
 
@@ -24,7 +93,7 @@ In-link encodings pick the shortest of:
 `#w:` / `#h:` / `#p:` (the URL minus `https://www.`, `https://`, `http://`), and `#u:` (deflate-compressed).
 Tracking parameters (`utm_*`, `fbclid`, `gclid`, YouTube/Spotify `si`, …) are stripped unless you untick the box.
 
-The server calls is.gd with the system `curl` (installed with pacman) and stores nothing.
+The server calls is.gd with the system `curl` and stores nothing.
 The Gist token is kept in the browser's localStorage and sent only to api.github.com.
 Opening a gist link uses GitHub's unauthenticated API (60 lookups per hour per IP).
 
@@ -33,50 +102,29 @@ Opening a gist link uses GitHub's unauthenticated API (60 lookups per hour per I
 | Path | What |
 |---|---|
 | `/` | Web UI: create text/URL links, open the webhook monitor |
-| `/#t:<data>` / `/#u:<data>` | View a text paste / follow a URL link (3 s countdown, http/https only) |
+| `/#t:<data>`, `/#yt:…`, `/#h:…`, `/#s:…` … | View a text paste / follow a URL link (3 s countdown, http/https only) |
 | `/w/<channel>` | Live webhook monitor in the browser |
 | `ANY /hook/<channel>[/sub/path]` | Receive a webhook, rebroadcast it. Replies `{"delivered_to": N}` |
 | `GET /listen/<channel>[?replay=N]` | Server-Sent Events stream; `replay` re-sends up to 50 recent events |
 | `GET /api/isgd?url=<url>` | Shorten via is.gd (max 20/min). Returns `{"shorturl": ...}` or `{"error": ...}` |
 | `/healthz` | Returns `ok` |
 
-Channel names are `[A-Za-z0-9_-]{1,64}`. There is no auth: use long random
-channel names (the UI generates them) as the secret. Events are kept in RAM only
-(last 50 per channel) and vanish on restart. Body limit is 1 MB.
-
-## Build for the Pi (from your Arch laptop)
-
-```bash
-rustup target add aarch64-unknown-linux-musl
-cargo build --release --target aarch64-unknown-linux-musl
-# -> target/aarch64-unknown-linux-musl/release/hashbox  (static, runs on any aarch64 Linux)
-```
-
-(Or build directly on the Pi with `cargo build --release`. It works but takes a while on a Pi 3.)
-
-## Install on the Pi
-
-```bash
-scp target/aarch64-unknown-linux-musl/release/hashbox hashbox.service alarm@192.168.1.150:
-ssh alarm@192.168.1.150
-sudo install -m755 hashbox /usr/local/bin/
-sudo install -m644 hashbox.service /etc/systemd/system/
-sudo systemctl daemon-reload && sudo systemctl enable --now hashbox
-```
-
-Then open http://192.168.1.150:8080.
+Channel names are `[A-Za-z0-9_-]{1,64}`; use long random names (the UI generates them).
+Events vanish on restart.
 
 ## Listening from devices
 
 ```bash
-curl -N http://192.168.1.150:8080/listen/<channel>          # raw stream
-./examples/listen.sh http://192.168.1.150:8080 <channel>     # runs a command per event
+curl -N https://<host>/listen/<channel>          # raw stream (add -u user:pass behind basic_auth)
+./examples/listen.sh https://<host> <channel>    # runs a command per event
 ```
 
 In JavaScript: `new EventSource("/listen/<channel>").addEventListener("hook", e => JSON.parse(e.data))`.
 
-## Exposing it to the internet
+## Building by hand
 
-External services (GitHub, Stripe…) need to reach `/hook/...`. Put Caddy in front for HTTPS
-and expose it with a port forward, Tailscale Funnel, or a Cloudflare Tunnel. If you use nginx,
-disable buffering on `/listen/` (hashbox already sends `X-Accel-Buffering: no`).
+```bash
+rustup target add x86_64-unknown-linux-musl aarch64-unknown-linux-musl
+cargo build --release --target x86_64-unknown-linux-musl     # VPS
+cargo build --release --target aarch64-unknown-linux-musl    # Raspberry Pi
+```

@@ -1,0 +1,228 @@
+#!/usr/bin/env bash
+# hashbox-deploy: install hashbox and keep it in sync with the builds GitHub
+# Actions publishes on every push to main.
+#
+#   hashbox-deploy install [--bind ADDR]   first-time setup (run as root)
+#   hashbox-deploy update  [--force]       install the newest build if there is one
+#   hashbox-deploy status                  show version, service and timer state
+#   hashbox-deploy uninstall               remove everything except /etc/hashbox
+#
+# First install on a new machine:
+#   curl -fsSL https://github.com/AnCarsenat/hashbox/releases/download/latest/hashbox-deploy | sudo bash -s install
+#
+# Settings live in /etc/hashbox/hashbox.env (bind address, limits); updates never touch it.
+set -euo pipefail
+umask 022
+
+REPO="${HASHBOX_REPO:-AnCarsenat/hashbox}"
+BASE_URL="${HASHBOX_BASE_URL:-https://github.com/$REPO/releases/download/latest}"
+ROOT="${HASHBOX_ROOT:-}"                 # install prefix, only for testing
+BIN="$ROOT/usr/local/bin/hashbox"
+SELF="$ROOT/usr/local/bin/hashbox-deploy"
+UNIT_DIR="$ROOT/etc/systemd/system"
+CONF_DIR="$ROOT/etc/hashbox"
+ENV_FILE="$CONF_DIR/hashbox.env"
+STATE_DIR="$ROOT/var/lib/hashbox-deploy"
+SVC_USER=hashbox
+
+log() { echo "hashbox-deploy: $*"; }
+die() { echo "hashbox-deploy: error: $*" >&2; exit 1; }
+
+need_root() { [ "$(id -u)" -eq 0 ] || die "run this as root (sudo hashbox-deploy $*)"; }
+need() { command -v "$1" >/dev/null 2>&1 || die "$1 is required but not installed"; }
+
+cpu() {
+  case "$(uname -m)" in
+    x86_64 | amd64) echo x86_64 ;;
+    aarch64 | arm64) echo aarch64 ;;
+    *) die "no hashbox build for this CPU ($(uname -m)); build it from source instead" ;;
+  esac
+}
+
+installed_version() { cat "$STATE_DIR/VERSION" 2>/dev/null || echo none; }
+
+get() { # get FILE DEST
+  curl -fsSL --proto '=https' --tlsv1.2 --retry 3 --retry-delay 2 --max-time 120 \
+    -o "$2" "$BASE_URL/$1" 2>/dev/null || die "could not download $1 from $BASE_URL"
+}
+
+remote_version() { # remote_version DIR -> prints commit id
+  get VERSION "$1/VERSION"
+  local v; v="$(tr -d '[:space:]' < "$1/VERSION")"
+  [[ "$v" =~ ^[0-9a-f]{7,40}$ ]] || die "the published VERSION file looks wrong: $v"
+  echo "$v"
+}
+
+fetch_build() { # fetch_build DIR: download this CPU's binary + support files, verify checksums
+  local d="$1" arch f; arch="$(cpu)"
+  for f in SHA256SUMS "hashbox-$arch" hashbox-deploy hashbox.service hashbox-update.service hashbox-update.timer; do
+    get "$f" "$d/$f"
+  done
+  for f in VERSION "hashbox-$arch" hashbox-deploy hashbox.service hashbox-update.service hashbox-update.timer; do
+    grep -qE "^[0-9a-f]{64}  $f\$" "$d/SHA256SUMS" || die "$f is missing from SHA256SUMS"
+  done
+  (cd "$d" && sha256sum --quiet --check --ignore-missing SHA256SUMS) \
+    || die "checksum mismatch; a new build is probably still uploading, try again in a few minutes"
+  mv "$d/hashbox-$arch" "$d/hashbox"
+  chmod 755 "$d/hashbox" "$d/hashbox-deploy"
+}
+
+health_url() {
+  local bind host port
+  bind="$(sed -n 's/^HASHBOX_BIND=//p' "$ENV_FILE" 2>/dev/null | tail -n1)"
+  bind="${bind:-127.0.0.1:8080}"
+  host="${bind%:*}"; port="${bind##*:}"
+  case "$host" in 0.0.0.0 | "[::]" | "") host=127.0.0.1 ;; esac
+  echo "http://$host:$port/healthz"
+}
+
+healthy() {
+  local url; url="$(health_url)"
+  for _ in $(seq 1 15); do
+    curl -fsS -m 2 "$url" >/dev/null 2>&1 && return 0
+    sleep 1
+  done
+  return 1
+}
+
+# Replace FILE with NEW atomically (rename), keeping FILE.prev for rollback.
+swap_in() { # swap_in NEW FILE MODE -> returns 0 if FILE changed
+  local new="$1" file="$2" mode="$3"
+  if [ -f "$file" ] && cmp -s "$new" "$file"; then return 1; fi
+  if [ -f "$file" ]; then cp -p "$file" "$file.prev"; else rm -f "$file.prev"; fi
+  install -m "$mode" "$new" "$file.new"
+  mv -f "$file.new" "$file"
+  return 0
+}
+
+rollback() {
+  local f
+  for f in "$BIN" "$UNIT_DIR/hashbox.service"; do
+    if [ -f "$f.prev" ]; then mv -f "$f.prev" "$f"; fi
+  done
+  systemctl daemon-reload
+  systemctl restart hashbox || true
+}
+
+apply_build() { # apply_build DIR VERSION
+  local d="$1" version="$2" units_changed=0
+  mkdir -p "$(dirname "$BIN")" "$UNIT_DIR" "$STATE_DIR"
+  swap_in "$d/hashbox" "$BIN" 755 || true
+  for u in hashbox.service hashbox-update.service hashbox-update.timer; do
+    swap_in "$d/$u" "$UNIT_DIR/$u" 644 && units_changed=1
+  done
+  [ "$units_changed" = 1 ] && systemctl daemon-reload
+  systemctl restart hashbox
+  if healthy; then
+    echo "$version" > "$STATE_DIR/VERSION"
+    rm -f "$BIN.prev" "$UNIT_DIR/hashbox.service.prev" "$UNIT_DIR"/hashbox-update.*.prev
+    # Update this script last, by rename, so the running copy is never overwritten.
+    swap_in "$d/hashbox-deploy" "$SELF" 755 && rm -f "$SELF.prev"
+    log "running ${version:0:7}"
+  else
+    log "the new build failed its health check ($(health_url)); rolling back"
+    rollback
+    die "update to ${version:0:7} failed, previous version restored. See: journalctl -u hashbox -n 50"
+  fi
+}
+
+with_tmp() { TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT; }
+
+cmd_install() {
+  need_root install
+  local bind="127.0.0.1:8080"
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --bind) [ $# -ge 2 ] || die "--bind needs an address like 127.0.0.1:8080"; bind="$2"; shift 2 ;;
+      *) die "unknown option for install: $1" ;;
+    esac
+  done
+  [[ "$bind" =~ ^(\[[0-9a-fA-F:]+\]|[0-9.]+):[0-9]{1,5}$ ]] || die "--bind must look like 127.0.0.1:8080"
+  need curl; need sha256sum; need systemctl
+
+  # Dedicated system account: no login, no home, no password.
+  if ! id -u "$SVC_USER" >/dev/null 2>&1; then
+    local nologin; nologin="$(command -v nologin || echo /bin/false)"
+    useradd --system --user-group --no-create-home --home-dir / --shell "$nologin" \
+      --comment "hashbox service" "$SVC_USER"
+    log "created system user '$SVC_USER'"
+  fi
+
+  mkdir -p "$CONF_DIR"
+  if [ ! -f "$ENV_FILE" ]; then
+    cat > "$ENV_FILE" <<EOF
+# hashbox settings (read at start; run 'systemctl restart hashbox' after editing).
+# Updates never change this file.
+HASHBOX_BIND=$bind
+# Limits (defaults shown):
+#HASHBOX_MAX_BODY_KB=256
+#HASHBOX_MAX_LISTENERS=200
+#HASHBOX_MAX_LISTENERS_PER_CHANNEL=20
+#HASHBOX_HISTORY_MB=8
+#HASHBOX_HOOKS_PER_MINUTE=120
+#HASHBOX_MAX_CHANNELS=1000
+EOF
+    chmod 644 "$ENV_FILE"
+    log "wrote $ENV_FILE (bind $bind)"
+  else
+    log "keeping existing $ENV_FILE"
+  fi
+
+  with_tmp
+  local version; version="$(remote_version "$TMP")"
+  fetch_build "$TMP"
+  # An older hand-installed copy may be running; replace it cleanly.
+  systemctl stop hashbox 2>/dev/null || true
+  apply_build "$TMP" "$version"
+  systemctl enable --quiet hashbox hashbox-update.timer
+  systemctl start hashbox-update.timer
+  log "installed. hashbox checks GitHub for new builds every 15 minutes."
+  log "settings: $ENV_FILE   logs: journalctl -u hashbox   status: hashbox-deploy status"
+}
+
+cmd_update() {
+  need_root update
+  local force=0
+  [ "${1:-}" = "--force" ] && force=1
+  need curl; need sha256sum
+  [ -x "$BIN" ] || die "hashbox is not installed yet; run: hashbox-deploy install"
+  with_tmp
+  local current version
+  current="$(installed_version)"
+  version="$(remote_version "$TMP")"
+  if [ "$version" = "$current" ] && [ "$force" = 0 ]; then
+    log "up to date (${current:0:7})"
+    return 0
+  fi
+  log "updating ${current:0:7} -> ${version:0:7}"
+  fetch_build "$TMP"
+  apply_build "$TMP" "$version"
+}
+
+cmd_status() {
+  echo "installed build: $(installed_version)"
+  echo "source:          $BASE_URL"
+  echo "service:         $(systemctl is-active hashbox 2>/dev/null || true)"
+  echo "update timer:    $(systemctl is-active hashbox-update.timer 2>/dev/null || true)"
+  systemctl list-timers hashbox-update.timer --no-pager 2>/dev/null | sed -n '2p' | sed 's/^/next check:      /' || true
+  if curl -fsS -m 2 "$(health_url)" >/dev/null 2>&1; then echo "health:          ok"; else echo "health:          not answering"; fi
+}
+
+cmd_uninstall() {
+  need_root uninstall
+  systemctl disable --now hashbox-update.timer hashbox 2>/dev/null || true
+  rm -f "$UNIT_DIR"/hashbox.service* "$UNIT_DIR"/hashbox-update.* "$BIN" "$BIN.prev"
+  rm -rf "$STATE_DIR"
+  systemctl daemon-reload
+  if id -u "$SVC_USER" >/dev/null 2>&1; then userdel "$SVC_USER" 2>/dev/null || true; fi
+  log "removed hashbox. Settings kept in $CONF_DIR; this script remains at $SELF."
+}
+
+case "${1:-}" in
+  install) shift; cmd_install "$@" ;;
+  update) shift; cmd_update "$@" ;;
+  status) cmd_status ;;
+  uninstall) cmd_uninstall ;;
+  *) sed -n '2,13p' "$0" 2>/dev/null | sed 's/^# \{0,1\}//' || true
+     [ -n "${1:-}" ] && die "unknown command: $1"; exit 0 ;;
+esac

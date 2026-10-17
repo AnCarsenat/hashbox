@@ -1,0 +1,66 @@
+# On every push to main: build static binaries for x86_64 (VPS) and aarch64
+# (Raspberry Pi) and publish them to the rolling "latest" release, where
+# hashbox-deploy picks them up.
+name: build
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust targets
+        run: rustup target add x86_64-unknown-linux-musl aarch64-unknown-linux-musl
+
+      - name: Check deploy script
+        run: bash -n deploy/hashbox-deploy && shellcheck -S warning deploy/hashbox-deploy
+
+      - name: Build
+        run: |
+          cargo build --release --locked --target x86_64-unknown-linux-musl
+          cargo build --release --locked --target aarch64-unknown-linux-musl
+
+      - name: Smoke test
+        run: |
+          ./target/x86_64-unknown-linux-musl/release/hashbox &
+          sleep 1
+          curl -fsS http://127.0.0.1:8080/healthz
+          kill %1
+
+      - name: Collect release files
+        run: |
+          mkdir dist
+          cp target/x86_64-unknown-linux-musl/release/hashbox  dist/hashbox-x86_64
+          cp target/aarch64-unknown-linux-musl/release/hashbox dist/hashbox-aarch64
+          cp deploy/hashbox-deploy deploy/hashbox.service deploy/hashbox-update.service deploy/hashbox-update.timer dist/
+          echo "$GITHUB_SHA" > dist/VERSION
+          cd dist && sha256sum VERSION hashbox-x86_64 hashbox-aarch64 hashbox-deploy \
+            hashbox.service hashbox-update.service hashbox-update.timer > SHA256SUMS
+
+      - name: Publish to the "latest" release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          git tag -f latest
+          git push -f origin refs/tags/latest
+          gh release view latest >/dev/null 2>&1 \
+            || gh release create latest --title "Latest build" --notes "Built automatically from main." --latest
+          # Binaries first, checksums and VERSION last: a server that checks mid-upload
+          # sees a checksum mismatch and simply retries on its next run.
+          gh release upload latest --clobber dist/hashbox-x86_64 dist/hashbox-aarch64 \
+            dist/hashbox-deploy dist/hashbox.service dist/hashbox-update.service dist/hashbox-update.timer
+          gh release upload latest --clobber dist/SHA256SUMS
+          gh release upload latest --clobber dist/VERSION
+          gh release edit latest --notes "Built from ${GITHUB_SHA} on $(date -u '+%Y-%m-%d %H:%M UTC')."

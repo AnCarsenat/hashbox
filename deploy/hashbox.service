@@ -1,0 +1,55 @@
+# Installed and kept up to date by hashbox-deploy. Local settings go in
+# /etc/hashbox/hashbox.env, which updates never touch.
+[Unit]
+Description=hashbox (data-in-link paste/URL + webhook relay)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=hashbox
+Group=hashbox
+Environment=HASHBOX_BIND=127.0.0.1:8080
+EnvironmentFile=-/etc/hashbox/hashbox.env
+ExecStart=/usr/local/bin/hashbox
+Restart=on-failure
+RestartSec=2
+TimeoutStopSec=10
+
+# Resource caps: a flood can't starve other services on the machine.
+MemoryMax=64M
+TasksMax=64
+LimitNOFILE=4096
+
+# Sandbox: no capabilities, read-only system, no access to homes or devices.
+# Binding a port below 1024 directly would need CAP_NET_BIND_SERVICE; use a
+# reverse proxy (Caddy) on 80/443 instead.
+CapabilityBoundingSet=
+AmbientCapabilities=
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+ProtectProc=invisible
+ProcSubset=pid
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+RemoveIPC=yes
+UMask=0077
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallFilter=~@privileged
+# AF_NETLINK lets curl (the is.gd relay) resolve hostnames.
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX AF_NETLINK
+
+[Install]
+WantedBy=multi-user.target
