@@ -384,6 +384,16 @@
       <p class="meta">Because content isn't stored, there is usually nothing to delete afterwards: a chat or clipboard
         is gone minutes after it's closed. For a link, the content is in the link itself, so please also report it
         to the site it points to, or to <a href="https://safebrowsing.google.com/safebrowsing/report_phish/" rel="noopener noreferrer" target="_blank">Google Safe Browsing</a>.</p>
+
+      <h2 id="legal">Mentions légales · Legal notice</h2>
+      <p><b>Éditeur :</b> particulier, à titre non professionnel. Conformément à l'article 1-1, II de la
+        loi n° 2004-575 du 21 juin 2004 (LCEN), son identité a été communiquée à l'hébergeur ci-dessous,
+        qui ne peut la divulguer qu'à la demande de l'autorité judiciaire.</p>
+      <p><b>Hébergeur :</b> <span id="r-host"></span></p>
+      <p><b>Contact :</b> <span id="r-contact2"></span></p>
+      <p class="meta">Publisher: a private individual acting in a non-professional capacity, whose identity has been
+        given to the hosting provider above (French LCEN, art. 1-1, II). Content shared through hashbox is created by
+        its users; see the guidelines above for how long anything is kept.</p>
     </div>
   </section>
 
@@ -407,7 +417,7 @@
     <div class="events" id="m-events"><div class="empty" id="m-empty">Waiting for webhooks…</div></div>
   </section>
 
-  <footer><a href="/">hashbox</a><a href="/rules">Guidelines</a><a href="/rules#report">Report abuse</a></footer>
+  <footer><a href="/">hashbox</a><a href="/rules">Guidelines</a><a href="/rules#report">Report abuse</a><a href="/rules#legal">Mentions légales</a></footer>
 </main>
 
 <script>
@@ -973,7 +983,10 @@ function viewRules() {
   } else {
     c.textContent = "This server's operator hasn't published a contact address.";
   }
-  if (location.hash === "#report") $("report").scrollIntoView();
+  $("r-host").textContent = CONFIG.host_info || "non renseigné par l'opérateur de ce serveur (not provided)";
+  $("r-contact2").textContent = CONFIG.contact || "non renseigné (not provided)";
+  const target = location.hash.length > 1 && document.getElementById(location.hash.slice(1));
+  if (target) target.scrollIntoView();
 }
 
 /* ---------- webhook monitor ---------- */

@@ -144,6 +144,7 @@ struct AppState {
     limits: Limits,
     features: Features,
     contact: Option<String>,
+    host_info: Option<String>,
     trust_proxy: bool,
     registry: Mutex<Registry>,
     drops: Mutex<Drops>,
@@ -410,6 +411,7 @@ async fn config(State(state): State<Shared>) -> Response {
     Json(serde_json::json!({
         "features": state.features,
         "contact": state.contact,
+        "host_info": state.host_info,
         "drop_minutes": state.limits.drop_minutes,
     }))
     .into_response()
@@ -839,10 +841,15 @@ async fn main() {
 
     let limits = Limits::from_env();
     let features = Features::from_env();
-    let contact = std::env::var("HASHBOX_CONTACT")
-        .ok()
-        .map(|c| c.trim().chars().take(200).collect::<String>())
-        .filter(|c| !c.is_empty());
+    let env_text = |name: &str, max: usize| {
+        std::env::var(name)
+            .ok()
+            .map(|c| c.trim().chars().filter(|ch| !ch.is_control()).take(max).collect::<String>())
+            .filter(|c| !c.is_empty())
+    };
+    let contact = env_text("HASHBOX_CONTACT", 200);
+    // Hosting provider's name and address, for the legal notice (mentions légales).
+    let host_info = env_text("HASHBOX_HOST_INFO", 300);
     let max_body = limits.max_body;
     let drops = Drops::new(limits.clipboard_budget, Duration::from_secs(limits.drop_minutes * 60));
     let on = |b: bool| if b { "on" } else { "off" };
@@ -863,6 +870,7 @@ async fn main() {
         limits,
         features,
         contact,
+        host_info,
         trust_proxy: env_flag("HASHBOX_TRUST_PROXY"),
         registry: Mutex::new(Registry::default()),
         drops: Mutex::new(drops),

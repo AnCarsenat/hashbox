@@ -156,6 +156,8 @@ cmd_install() {
 HASHBOX_BIND=$bind
 # Shown on the Guidelines page as the address for abuse reports:
 #HASHBOX_CONTACT=you@example.com
+# Hosting provider's name and address, shown in the legal notice (mentions légales):
+#HASHBOX_HOST_INFO=Hetzner Online GmbH, Industriestr. 25, 91710 Gunzenhausen, Germany
 # Switch features off instantly if they get abused (comma list): chat,clipboard,isgd,hooks
 #HASHBOX_DISABLE=
 # Behind a reverse proxy, take visitor IPs from X-Forwarded-For for per-visitor limits:

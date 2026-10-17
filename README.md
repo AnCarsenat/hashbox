@@ -30,6 +30,9 @@ hashbox is designed so that one person can run it without watching content:
   (any subset) and run `sudo systemctl restart hashbox`. The features disappear from the page.
 - **Guidelines page** at `/rules`, linked from every page. Set `HASHBOX_CONTACT=you@example.com`
   to publish an address for abuse reports.
+- **Legal notice** (*mentions légales*, `/rules#legal`) for a non-professional publisher in France:
+  set `HASHBOX_HOST_INFO` to your hosting provider's name and address. Your own identity stays
+  private as long as your provider has it and the site has no economic activity (LCEN art. 1-1, II).
 
 Behind a reverse proxy, set `HASHBOX_TRUST_PROXY=1` so limits apply per visitor rather than to
 the proxy. Without it, `X-Forwarded-For` is ignored (it could be forged).
