@@ -5,6 +5,8 @@
 //!    instance (or any copy of the page) can open any link; the server stores nothing.
 //! 2. Webhook fan-out relay. Anything sent to `/hook/<channel>` is rebroadcast,
 //!    live, to every client listening on `/listen/<channel>` (Server-Sent Events).
+//! 3. `/api/isgd`: a stateless relay to the is.gd shortener (via the system `curl`),
+//!    so the page never has to load third-party scripts. Nothing is stored here.
 
 use std::{
     collections::{HashMap, VecDeque},
@@ -13,7 +15,7 @@ use std::{
         atomic::{AtomicU64, Ordering},
         Arc, Mutex,
     },
-    time::{Duration, SystemTime, UNIX_EPOCH},
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
 use axum::{
@@ -70,7 +72,12 @@ struct Channel {
 struct AppState {
     channels: Mutex<HashMap<String, Channel>>,
     next_id: AtomicU64,
+    /// Times of recent is.gd calls, for a simple rate limit.
+    isgd_calls: Mutex<VecDeque<Instant>>,
 }
+
+/// is.gd asks for low-volume use; stay well under it.
+const ISGD_MAX_PER_MINUTE: usize = 20;
 
 type Shared = Arc<AppState>;
 
@@ -131,7 +138,8 @@ async fn index() -> impl IntoResponse {
             (
                 header::CONTENT_SECURITY_POLICY,
                 "default-src 'self'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; \
-                 connect-src 'self'; img-src 'self' data:; base-uri 'none'; form-action 'none'",
+                 connect-src 'self' https://api.github.com; img-src 'self' data:; \
+                 base-uri 'none'; form-action 'none'",
             ),
         ],
         Html(INDEX_HTML),
@@ -276,6 +284,74 @@ async fn listen(
     res
 }
 
+#[derive(Deserialize)]
+struct ShortenQuery {
+    url: String,
+}
+
+fn json_error(status: StatusCode, msg: &str) -> Response {
+    (status, Json(serde_json::json!({ "error": msg }))).into_response()
+}
+
+/// Shorten a URL with is.gd. hashbox keeps no record of it.
+async fn isgd(State(state): State<Shared>, Query(q): Query<ShortenQuery>) -> Response {
+    let url = q.url.trim();
+    if !(url.starts_with("https://") || url.starts_with("http://")) || url.len() > 5000 {
+        return json_error(StatusCode::BAD_REQUEST, "only http(s) URLs up to 5000 characters");
+    }
+
+    {
+        let mut calls = state.isgd_calls.lock().unwrap();
+        let now = Instant::now();
+        while calls
+            .front()
+            .is_some_and(|t| now.duration_since(*t) > Duration::from_secs(60))
+        {
+            calls.pop_front();
+        }
+        if calls.len() >= ISGD_MAX_PER_MINUTE {
+            return json_error(StatusCode::TOO_MANY_REQUESTS, "too many shortenings, wait a minute");
+        }
+        calls.push_back(now);
+    }
+
+    let endpoint = std::env::var("HASHBOX_ISGD_ENDPOINT")
+        .unwrap_or_else(|_| "https://is.gd/create.php".into());
+    // Arguments are passed directly (no shell). The URL was checked to start with
+    // http(s)://, so curl reads `url=...` as name=content, never as a file path.
+    let run = tokio::process::Command::new("curl")
+        .args(["-sS", "--max-time", "10", "-G", "--data", "format=json", "--data-urlencode"])
+        .arg(format!("url={url}"))
+        .arg(&endpoint)
+        .kill_on_drop(true)
+        .output();
+
+    let out = match tokio::time::timeout(Duration::from_secs(15), run).await {
+        Ok(Ok(out)) => out,
+        Ok(Err(e)) if e.kind() == std::io::ErrorKind::NotFound => {
+            return json_error(StatusCode::BAD_GATEWAY, "curl is not installed on the server")
+        }
+        Ok(Err(_)) | Err(_) => return json_error(StatusCode::BAD_GATEWAY, "is.gd did not answer"),
+    };
+
+    let reply: serde_json::Value = match serde_json::from_slice(&out.stdout) {
+        Ok(v) => v,
+        Err(_) => return json_error(StatusCode::BAD_GATEWAY, "is.gd is unreachable from the server"),
+    };
+    match reply.get("shorturl").and_then(|s| s.as_str()) {
+        Some(short) if short.starts_with("https://") => {
+            Json(serde_json::json!({ "shorturl": short })).into_response()
+        }
+        _ => {
+            let msg = reply
+                .get("errormessage")
+                .and_then(|m| m.as_str())
+                .unwrap_or("is.gd refused this URL");
+            json_error(StatusCode::BAD_GATEWAY, msg)
+        }
+    }
+}
+
 #[tokio::main]
 async fn main() {
     let bind: SocketAddr = std::env::var("HASHBOX_BIND")
@@ -292,6 +368,7 @@ async fn main() {
         .route("/hook/{channel}", any(hook))
         .route("/hook/{channel}/{*rest}", any(hook))
         .route("/listen/{channel}", get(listen))
+        .route("/api/isgd", get(isgd))
         .layer(DefaultBodyLimit::max(MAX_BODY))
         .with_state(state);
 

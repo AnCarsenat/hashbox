@@ -74,6 +74,18 @@
   table.h td { border-top: 1px solid var(--line); padding: 3px 8px 3px 0; vertical-align: top; word-break: break-all; }
   table.h td:first-child { color: var(--muted); white-space: nowrap; width: 1%; }
   .empty { color: var(--muted); text-align: center; padding: 30px 0; }
+  label.check { display: inline-flex; gap: 6px; align-items: center; margin: 0; cursor: pointer; }
+  .opts { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 8px; margin-bottom: 12px; }
+  .opt { text-align: left; background: var(--panel); color: var(--ink); border: 1px solid var(--line);
+    border-radius: 10px; padding: 10px 12px; cursor: pointer; font: inherit; }
+  .opt[aria-checked="true"] { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
+  .opt:disabled { opacity: .55; cursor: default; }
+  .opt-title { font-weight: 600; display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+  .opt-len { font: 12px var(--mono); color: var(--muted); margin-left: auto; }
+  .opt-note { font-size: 12.5px; color: var(--muted); margin-top: 3px; line-height: 1.4; }
+  .badge { font-size: 11px; font-weight: 700; color: var(--accent-ink); background: var(--accent);
+    border-radius: 4px; padding: 1px 6px; }
+  .settings { margin-top: 18px; border-top: 1px solid var(--line); padding-top: 12px; }
   .help p { margin: 6px 0; }
 </style>
 </head>
@@ -110,14 +122,29 @@
       <label for="url-in">Destination URL</label>
       <input type="url" id="url-in" placeholder="https://example.com/some/long/path" spellcheck="false">
       <div class="row">
-        <button class="btn" id="url-make">Create link</button>
+        <button class="btn" id="url-make">Shorten</button>
+        <label class="check"><input type="checkbox" id="url-strip" checked> Strip tracking parameters</label>
       </div>
+      <div class="meta warn hidden" id="url-err"></div>
       <div class="out" id="url-out">
+        <div class="opts" id="url-opts" role="radiogroup" aria-label="Link type"></div>
         <div class="linkbox" id="url-link"></div>
         <div class="row"><button class="btn ghost" data-copy="url-link">Copy</button>
           <button class="btn ghost" data-open="url-link">Open</button></div>
         <div class="meta" id="url-meta"></div>
       </div>
+      <details class="settings" id="gh-settings">
+        <summary>GitHub Gist storage</summary>
+        <p class="meta">Gist links store the URL in a secret gist in your GitHub account, so they
+          work on every hashbox instance. Create a token with only the <code>gist</code> scope at
+          github.com/settings/tokens. It stays in this browser and is sent only to api.github.com.</p>
+        <div class="row">
+          <input type="password" id="gh-token" class="grow" placeholder="ghp_… or github_pat_…" autocomplete="off" spellcheck="false">
+          <button class="btn ghost" id="gh-save">Save</button>
+          <button class="btn ghost" id="gh-forget">Forget</button>
+        </div>
+        <div class="meta" id="gh-state"></div>
+      </details>
     </div>
 
     <div class="panel hidden help" data-pane="hook">
@@ -219,6 +246,135 @@ function sizeNote(link, el) {
     : `${n.toLocaleString()} characters. Works on any hashbox instance; just change the host.`;
 }
 
+/* ---------- compact URL encodings: the link itself carries the URL ----------
+   #yt:<id>[~secs]   YouTube video       #gh:<path>   github.com/<path>
+   #wp:<lang>/<page> Wikipedia article   #w: https://www.   #h: https://   #p: http://
+   #u:<deflate>      any URL, compressed (best for very long, repetitive URLs)
+   #s:<gist id>      URL stored in a GitHub gist (not in the link)                    */
+const TRACKING = /^(utm_[a-z_]+|fbclid|gclid|gclsrc|dclid|msclkid|yclid|igshid|igsh|mc_cid|mc_eid|_hsenc|_hsmi|ref_src|ref_url|spm)$/i;
+function stripTracking(u) {
+  const share = /(^|\.)(youtube\.com|youtu\.be|spotify\.com)$/.test(u.hostname);
+  const drop = [...u.searchParams.keys()].filter((k) => TRACKING.test(k) || (share && k === "si"));
+  if (!drop.length) return u;
+  const x = new URL(u.href);
+  drop.forEach((k) => x.searchParams.delete(k));
+  return x;
+}
+function parseT(t) {
+  if (t == null) return 0;
+  const m = t.match(/^(?:(\d+)h)?(?:(\d+)m)?(?:(\d+)s?)?$/);
+  if (!t || !m) return null;
+  return (+(m[1] || 0)) * 3600 + (+(m[2] || 0)) * 60 + (+(m[3] || 0));
+}
+const afterOrigin = (u) => u.href.slice(u.origin.length + 1);
+const CODECS = [
+  { tag: "yt",
+    enc(u) {
+      if (u.protocol !== "https:" || u.port) return null;
+      const host = u.hostname.replace(/^(www|m)\./, "");
+      let id = null;
+      if (host === "youtu.be") id = u.pathname.slice(1);
+      else if (host === "youtube.com") {
+        if (u.pathname === "/watch") id = u.searchParams.get("v");
+        else { const m = u.pathname.match(/^\/(?:shorts|live|embed)\/([^/]+)$/); if (m) id = m[1]; }
+      }
+      if (!id || !/^[A-Za-z0-9_-]{6,20}$/.test(id) || u.hash) return null;
+      if ([...u.searchParams.keys()].some((k) => k !== "v" && k !== "t")) return null;
+      const t = parseT(u.searchParams.get("t"));
+      return t == null ? null : id + (t ? "~" + t : "");
+    },
+    dec(r) {
+      const m = r.match(/^([A-Za-z0-9_-]{6,20})(?:~(\d+))?$/);
+      if (!m) throw new Error("bad YouTube link");
+      return `https://www.youtube.com/watch?v=${m[1]}` + (m[2] ? `&t=${m[2]}s` : "");
+    } },
+  { tag: "gh",
+    enc: (u) => u.protocol === "https:" && !u.port && /^(www\.)?github\.com$/.test(u.hostname) && u.pathname !== "/"
+      ? afterOrigin(u) : null,
+    dec: (r) => "https://github.com/" + r },
+  { tag: "wp",
+    enc(u) {
+      const m = u.hostname.match(/^([a-z][a-z-]{1,15})\.(?:m\.)?wikipedia\.org$/);
+      return u.protocol === "https:" && !u.port && m && u.pathname.startsWith("/wiki/") && u.pathname.length > 6
+        ? `${m[1]}/${u.href.slice(u.origin.length + 6)}` : null;
+    },
+    dec(r) {
+      const m = r.match(/^([a-z][a-z-]{1,15})\/([\s\S]+)$/);
+      if (!m) throw new Error("bad Wikipedia link");
+      return `https://${m[1]}.wikipedia.org/wiki/${m[2]}`;
+    } },
+  { tag: "w", enc: (u) => u.protocol === "https:" && u.hostname.startsWith("www.") ? u.href.slice(12) : null,
+    dec: (r) => "https://www." + r },
+  { tag: "h", enc: (u) => u.protocol === "https:" ? u.href.slice(8) : null, dec: (r) => "https://" + r },
+  { tag: "p", enc: (u) => u.protocol === "http:" ? u.href.slice(7) : null, dec: (r) => "http://" + r },
+];
+const URL_TAGS = new Set(["u", "s", ...CODECS.map((c) => c.tag)]);
+
+async function inlinkFor(u) {
+  const cands = [];
+  for (const c of CODECS) { const r = c.enc(u); if (r) cands.push(`${c.tag}:${r}`); }
+  cands.push("u:" + await pack(u.href));
+  return cands.reduce((a, b) => (b.length < a.length ? b : a));
+}
+async function decodeUrlFragment(frag) {
+  const i = frag.indexOf(":"), tag = frag.slice(0, i), rest = frag.slice(i + 1);
+  if (!rest) throw new Error("empty link");
+  if (tag === "u") return unpack(rest);
+  if (tag === "s") return gistRead(rest);
+  const c = CODECS.find((c) => c.tag === tag);
+  if (!c) throw new Error("unknown link type");
+  return c.dec(rest);
+}
+
+/* ---------- external storage: is.gd (via the server) and GitHub Gist (from the browser) ---------- */
+async function isgdCreate(url) {
+  const r = await fetch(`/api/isgd?url=${encodeURIComponent(url)}`);
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok || !j.shorturl) throw new Error(j.error || `server error ${r.status}`);
+  return j.shorturl;
+}
+const GH_KEY = "hashbox.ghToken";
+function ghToken() { try { return localStorage.getItem(GH_KEY) || ""; } catch { return ""; } }
+function gistIdEncode(id) {
+  if (!/^[0-9a-f]{32}$/.test(id)) return "_" + id;
+  const b = new Uint8Array(16);
+  for (let i = 0; i < 16; i++) b[i] = parseInt(id.substr(i * 2, 2), 16);
+  return b64url(b);
+}
+function gistIdDecode(s) {
+  if (s.startsWith("_")) {
+    if (!/^_[A-Za-z0-9]{1,64}$/.test(s)) throw new Error("bad gist link");
+    return s.slice(1);
+  }
+  const b = unb64url(s);
+  if (b.length !== 16) throw new Error("bad gist link");
+  return Array.from(b, (x) => x.toString(16).padStart(2, "0")).join("");
+}
+async function gistCreate(url) {
+  const token = ghToken();
+  if (!token) throw new Error("No GitHub token saved");
+  const r = await fetch("https://api.github.com/gists", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}`, Accept: "application/vnd.github+json", "Content-Type": "application/json" },
+    body: JSON.stringify({ description: "hashbox link", public: false,
+      files: { "hashbox.json": { content: JSON.stringify({ v: 1, kind: "url", value: url }) } } }),
+  });
+  if (!r.ok) throw new Error(r.status === 401 ? "GitHub rejected the token"
+    : r.status === 403 || r.status === 404 ? "Token lacks the gist scope" : `GitHub error ${r.status}`);
+  return "s:" + gistIdEncode((await r.json()).id);
+}
+async function gistRead(s) {
+  const id = gistIdDecode(s);
+  const r = await fetch(`https://api.github.com/gists/${id}`, { headers: { Accept: "application/vnd.github+json" } });
+  if (!r.ok) throw new Error(r.status === 404 ? "This gist no longer exists"
+    : r.status === 403 || r.status === 429 ? "GitHub rate limit reached, try again in a few minutes" : `GitHub error ${r.status}`);
+  const f = (await r.json()).files?.["hashbox.json"];
+  if (!f) throw new Error("This gist is not a hashbox link");
+  const data = JSON.parse(f.content);
+  if (data.kind !== "url" || typeof data.value !== "string") throw new Error("This gist is not a hashbox link");
+  return data.value;
+}
+
 /* ---------- helpers ---------- */
 async function copyFrom(el, btn) {
   try { await navigator.clipboard.writeText(el.textContent); }
@@ -260,19 +416,7 @@ function initCompose(prefill) {
   });
   ti.addEventListener("keydown", (e) => { if ((e.ctrlKey || e.metaKey) && e.key === "Enter") $("text-make").click(); });
 
-  $("url-make").addEventListener("click", async () => {
-    let u = $("url-in").value.trim();
-    if (!u) return $("url-in").focus();
-    if (!/^[a-z][a-z0-9+.-]*:/i.test(u)) u = "https://" + u;
-    let parsed; try { parsed = new URL(u); } catch { parsed = null; }
-    if (!parsed || !/^https?:$/.test(parsed.protocol)) {
-      $("url-meta").className = "meta warn"; $("url-meta").textContent = "Only http:// and https:// links are allowed.";
-      $("url-out").classList.add("show"); $("url-link").textContent = ""; return;
-    }
-    const link = `${ORIGIN}/#u:${await pack(parsed.href)}`;
-    $("url-link").textContent = link; $("url-out").classList.add("show"); sizeNote(link, $("url-meta"));
-  });
-  $("url-in").addEventListener("keydown", (e) => { if (e.key === "Enter") $("url-make").click(); });
+  initUrlPicker();
 
   $("ch-in").value = randomChannel();
   $("ch-rand").addEventListener("click", () => $("ch-in").value = randomChannel());
@@ -281,6 +425,103 @@ function initCompose(prefill) {
     if (!/^[A-Za-z0-9_-]{1,64}$/.test(c)) { $("ch-in").focus(); return; }
     location.href = `/w/${c}`;
   });
+}
+
+/* ---------- URL tab: three ways to shorten, best one proposed ---------- */
+const INLINK_GOOD = 80;          // in-link wins if the whole link stays this short
+const OPTIONS = {
+  inlink: { title: "In the link", note: "No third party. Opens on any hashbox." },
+  isgd: { title: "is.gd", note: "Shortest. Stored publicly by is.gd, forever." },
+  gist: { title: "GitHub Gist", note: "Stored in your GitHub account. Opens on any hashbox." },
+};
+const LINK_NOTES = {
+  isgd: "is.gd keeps this permanently; anyone can look up where it points.",
+  gist: "Secret gist in your GitHub account. Delete the gist to disable the link.",
+};
+let cur = null;   // state for the URL currently being shortened
+
+function initUrlPicker() {
+  const strip = $("url-strip");
+  try { strip.checked = localStorage.getItem("hashbox.strip") !== "0"; } catch {}
+  strip.addEventListener("change", () => {
+    try { localStorage.setItem("hashbox.strip", strip.checked ? "1" : "0"); } catch {}
+    if (cur) shorten();
+  });
+  $("url-make").addEventListener("click", shorten);
+  $("url-in").addEventListener("keydown", (e) => { if (e.key === "Enter") shorten(); });
+
+  const ghState = () => { $("gh-state").textContent = ghToken() ? "A token is saved in this browser." : "No token saved."; };
+  ghState();
+  $("gh-save").addEventListener("click", () => {
+    const t = $("gh-token").value.trim(); if (!t) return $("gh-token").focus();
+    try { localStorage.setItem(GH_KEY, t); } catch { $("gh-state").textContent = "This browser blocks storage; the token can't be kept."; return; }
+    $("gh-token").value = ""; ghState(); if (cur) { delete cur.errors.gist; renderOpts(); }
+  });
+  $("gh-forget").addEventListener("click", () => {
+    try { localStorage.removeItem(GH_KEY); } catch {}
+    ghState(); if (cur) { if (cur.sel === "gist") select(cur.rec); else renderOpts(); }
+  });
+}
+
+async function shorten() {
+  const err = $("url-err"); err.classList.add("hidden");
+  let raw = $("url-in").value.trim();
+  if (!raw) return $("url-in").focus();
+  if (!/^[a-z][a-z0-9+.-]*:/i.test(raw)) raw = "https://" + raw;
+  let u; try { u = new URL(raw); } catch { u = null; }
+  if (!u || !/^https?:$/.test(u.protocol) || !u.hostname.includes(".") && u.hostname !== "localhost") {
+    err.textContent = "That doesn't look like a web address (http:// or https://).";
+    err.classList.remove("hidden"); $("url-out").classList.remove("show"); cur = null; return;
+  }
+  if ($("url-strip").checked) u = stripTracking(u);
+  const inlink = `${ORIGIN}/#${await inlinkFor(u)}`;
+  const rec = inlink.length <= INLINK_GOOD ? "inlink" : "isgd";
+  cur = { url: u.href, links: { inlink }, errors: {}, rec, sel: rec };
+  $("url-out").classList.add("show");
+  select(rec);
+}
+
+function estLen(kind) {
+  if (cur.links[kind]) return `${cur.links[kind].length} chars`;
+  return kind === "isgd" ? "~22 chars" : `~${ORIGIN.length + 26} chars`;
+}
+
+function renderOpts() {
+  const box = $("url-opts"); box.textContent = "";
+  for (const [kind, o] of Object.entries(OPTIONS)) {
+    const b = document.createElement("button");
+    b.className = "opt"; b.type = "button"; b.setAttribute("role", "radio");
+    b.setAttribute("aria-checked", String(cur.sel === kind));
+    const needsToken = kind === "gist" && !ghToken();
+    b.disabled = needsToken;
+    const t = document.createElement("div"); t.className = "opt-title"; t.append(o.title);
+    if (kind === cur.rec) { const s = document.createElement("span"); s.className = "badge"; s.textContent = "Recommended"; t.append(s); }
+    const l = document.createElement("span"); l.className = "opt-len"; l.textContent = estLen(kind); t.append(l);
+    const n = document.createElement("div"); n.className = "opt-note";
+    if (cur.errors[kind]) { n.textContent = cur.errors[kind]; n.style.color = "var(--warn)"; }
+    else n.textContent = needsToken ? "Add a GitHub token below to enable." : o.note;
+    b.append(t, n);
+    b.addEventListener("click", () => select(kind));
+    box.append(b);
+  }
+}
+
+async function select(kind) {
+  const mine = cur; mine.sel = kind; renderOpts();
+  const link = $("url-link"), meta = $("url-meta");
+  if (!mine.links[kind] && !mine.errors[kind]) {
+    link.textContent = ""; meta.className = "meta"; meta.textContent = kind === "isgd" ? "Asking is.gd…" : "Creating gist…";
+    try { mine.links[kind] = kind === "isgd" ? await isgdCreate(mine.url) : `${ORIGIN}/#${await gistCreate(mine.url)}`; }
+    catch (e) { mine.errors[kind] = e.message || String(e); }
+    if (cur !== mine || mine.sel !== kind) return;   // user moved on meanwhile
+    renderOpts();
+  }
+  if (mine.errors[kind]) {
+    link.textContent = ""; meta.className = "meta warn"; meta.textContent = mine.errors[kind]; return;
+  }
+  link.textContent = mine.links[kind];
+  if (kind === "inlink") sizeNote(mine.links[kind], meta);
+  else { meta.className = "meta"; meta.textContent = LINK_NOTES[kind]; }
 }
 
 /* ---------- view text ---------- */
@@ -304,12 +545,14 @@ async function viewText(data) {
 }
 
 /* ---------- view URL ---------- */
-async function viewUrl(data) {
+async function viewUrl(frag) {
   show("view-url");
-  let dest;
-  try { dest = new URL(await unpack(data)); } catch { dest = null; }
+  $("vu-dest").textContent = frag.startsWith("s:") ? "Looking up the gist…" : "";
+  let dest, why = "This link is damaged or not a valid web address.";
+  try { dest = new URL(await decodeUrlFragment(frag)); }
+  catch (e) { dest = null; if (frag.startsWith("s:") && e.message) why = e.message + "."; }
   if (!dest || !/^https?:$/.test(dest.protocol)) {
-    $("vu-dest").textContent = "This link is damaged or not a valid web address.";
+    $("vu-dest").textContent = why;
     $("vu-go").classList.add("hidden"); $("vu-stop").classList.add("hidden"); return;
   }
   document.title = "hashbox · " + dest.hostname;
@@ -389,7 +632,8 @@ function route() {
   const w = location.pathname.match(/^\/w\/([A-Za-z0-9_-]{1,64})$/);
   if (w) return monitor(w[1]);
   if (h.startsWith("t:")) return viewText(h.slice(2));
-  if (h.startsWith("u:")) return viewUrl(h.slice(2));
+  const tag = h.slice(0, h.indexOf(":"));
+  if (h.includes(":") && URL_TAGS.has(tag)) return viewUrl(h);
   initCompose();
 }
 window.addEventListener("hashchange", () => location.reload());
