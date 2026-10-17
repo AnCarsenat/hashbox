@@ -755,6 +755,20 @@ async fn isgd(
                 clip(&out.stderr).trim(),
                 clip(&out.stdout).trim()
             );
+            // is.gd sometimes answers in plain text instead of JSON (e.g. "Error, database
+            // insert failed" for some URLs). Pass a short, cleaned version of it along.
+            let said: String = String::from_utf8_lossy(&out.stdout)
+                .lines()
+                .next()
+                .unwrap_or("")
+                .chars()
+                .filter(|c| !c.is_control() && *c != '<' && *c != '>')
+                .take(120)
+                .collect();
+            let said = said.trim();
+            if out.status.success() && !said.is_empty() {
+                return json_error(StatusCode::BAD_GATEWAY, &format!("is.gd refused this URL: {said}"));
+            }
             return json_error(StatusCode::BAD_GATEWAY, "is.gd is unreachable from the server");
         }
     };
